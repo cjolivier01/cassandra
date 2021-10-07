@@ -54,7 +54,7 @@
                 <executions>
                     <execution>
                         <id>Run ant build script</id>
-                        <phase>compile</phase>
+                        <phase>prepare-package</phase>
                         <goals>
                             <goal>exec</goal>
                         </goals>

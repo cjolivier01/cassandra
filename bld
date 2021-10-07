@@ -17,5 +17,7 @@
 #
 SCRIPTDIR=$(dirname $(realpath $0))
 cd $SCRIPTDIR
+echo "BUILDING CASSANDRA..."
+echo ant $@
 JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 \
   ant $@
