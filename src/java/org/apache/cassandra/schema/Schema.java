@@ -42,12 +42,12 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
+import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import static java.lang.String.format;
-
 import static com.google.common.collect.Iterables.size;
 
 public final class Schema implements SchemaProvider
@@ -79,6 +79,37 @@ public final class Schema implements SchemaProvider
             load(SchemaKeyspace.metadata());
             load(SystemKeyspace.metadata());
         }
+    }
+
+    /**
+     * Add entries to system_schema.* for the hardcoded system keyspaces
+     * 
+     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+     */
+    public synchronized void saveSystemKeyspace()
+    {
+        SchemaKeyspace.saveSystemKeyspacesSchema();
+    }
+
+    /**
+     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+     */
+    public synchronized void truncateSchemaKeyspace()
+    {
+        SchemaKeyspace.truncate();
+    }
+
+    /**
+     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+     */
+    public synchronized Collection<Mutation> schemaKeyspaceAsMutations()
+    {
+        return SchemaKeyspace.convertSchemaToMutations();
+    }
+
+    public static KeyspaceMetadata getSystemKeyspaceMetadata()
+    {
+        return SchemaKeyspace.metadata();
     }
 
     /**
@@ -516,8 +547,10 @@ public final class Schema implements SchemaProvider
     /**
      * Read schema from system keyspace and calculate MD5 digest of every row, resulting digest
      * will be converted into UUID which would act as content-based version of the schema.
+     * 
+     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
      */
-    public void updateVersion()
+    public synchronized void updateVersion()
     {
         version = SchemaKeyspace.calculateSchemaDigest();
         SystemKeyspace.updateSchemaVersion(version);
@@ -579,6 +612,9 @@ public final class Schema implements SchemaProvider
         updateVersionAndAnnounce();
     }
 
+    /**
+     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+     */
     public synchronized TransformationResult transform(SchemaTransformation transformation, boolean locally, long now) throws UnknownHostException
     {
         KeyspacesDiff diff;
@@ -633,6 +669,9 @@ public final class Schema implements SchemaProvider
         }
     }
 
+    /**
+     * See CASSANDRA-16856/16996. Make sure schema pulls are synchronized to prevent concurrent schema pull/writes
+     */
     synchronized void merge(Collection<Mutation> mutations)
     {
         // only compare the keyspaces affected by this set of schema mutations
@@ -716,6 +755,13 @@ public final class Schema implements SchemaProvider
         keyspace.functions.udfs().forEach(this::notifyCreateFunction);
         keyspace.functions.udas().forEach(this::notifyCreateAggregate);
         SchemaDiagnostics.keyspaceCreated(this, keyspace);
+
+        // If keyspace has been added, we need to recalculate pending ranges to make sure
+        // we send mutations to the correct set of bootstrapping nodes. Refer CASSANDRA-15433.
+        if (keyspace.params.replication.klass != LocalStrategy.class)
+        {
+            PendingRangeCalculatorService.calculatePendingRanges(Keyspace.open(keyspace.name).getReplicationStrategy(), keyspace.name);
+        }
     }
 
     private void dropKeyspace(KeyspaceMetadata keyspace)
