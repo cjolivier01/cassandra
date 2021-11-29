@@ -1037,7 +1037,7 @@ truncateStatement returns [TruncateStatement stmt]
     ;
 
 /**
- * GRANT <permission> ON <resource> TO <rolename>
+ * GRANT <permission>[, <permission>]* | ALL ON <resource> TO <rolename>
  */
 grantPermissionsStatement returns [GrantPermissionsStatement stmt]
     : K_GRANT
@@ -1050,7 +1050,7 @@ grantPermissionsStatement returns [GrantPermissionsStatement stmt]
     ;
 
 /**
- * REVOKE <permission> ON <resource> FROM <rolename>
+ * REVOKE <permission>[, <permission>]* | ALL ON <resource> FROM <rolename>
  */
 revokePermissionsStatement returns [RevokePermissionsStatement stmt]
     : K_REVOKE
@@ -1105,7 +1105,7 @@ permission returns [Permission perm]
 
 permissionOrAll returns [Set<Permission> perms]
     : K_ALL ( K_PERMISSIONS )?       { $perms = Permission.ALL; }
-    | p=permission ( K_PERMISSION )? { $perms = EnumSet.of($p.perm); }
+    | p=permission ( K_PERMISSION )? { $perms = EnumSet.of($p.perm); } ( ',' p=permission ( K_PERMISSION )? { $perms.add($p.perm); } )*
     ;
 
 resource returns [IResource res]
@@ -1118,8 +1118,8 @@ resource returns [IResource res]
 dataResource returns [DataResource res]
     : K_ALL K_KEYSPACES { $res = DataResource.root(); }
     | K_KEYSPACE ks = keyspaceName { $res = DataResource.keyspace($ks.id); }
-    | ( K_COLUMNFAMILY )? cf = columnFamilyName
-      { $res = DataResource.table($cf.name.getKeyspace(), $cf.name.getName()); }
+    | ( K_COLUMNFAMILY )? cf = columnFamilyName { $res = DataResource.table($cf.name.getKeyspace(), $cf.name.getName()); }
+    | K_ALL K_TABLES K_IN K_KEYSPACE ks = keyspaceName { $res = DataResource.allTables($ks.id); }
     ;
 
 jmxResource returns [JMXResource res]
@@ -1554,9 +1554,10 @@ termGroup returns [Term.Raw term]
     ;
 
 simpleTerm returns [Term.Raw term]
-    : v=value                                 { $term = v; }
-    | f=function                              { $term = f; }
-    | '(' c=comparatorType ')' t=simpleTerm   { $term = new TypeCast(c, t); }
+    : v=value                                        { $term = v; }
+    | f=function                                     { $term = f; }
+    | '(' c=comparatorType ')' t=simpleTerm          { $term = new TypeCast(c, t); }
+    | K_CAST '(' t=simpleTerm K_AS n=native_type ')' { $term = FunctionCall.Raw.newCast(t, n); }
     ;
 
 columnOperation[List<Pair<ColumnIdentifier, Operation.RawUpdate>> operations]
@@ -1776,7 +1777,7 @@ native_type returns [CQL3Type t]
     | K_COUNTER   { $t = CQL3Type.Native.COUNTER; }
     | K_DECIMAL   { $t = CQL3Type.Native.DECIMAL; }
     | K_DOUBLE    { $t = CQL3Type.Native.DOUBLE; }
-    | K_DURATION    { $t = CQL3Type.Native.DURATION; }
+    | K_DURATION  { $t = CQL3Type.Native.DURATION; }
     | K_FLOAT     { $t = CQL3Type.Native.FLOAT; }
     | K_INET      { $t = CQL3Type.Native.INET;}
     | K_INT       { $t = CQL3Type.Native.INT; }

@@ -42,6 +42,8 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+
 /**
  * Handles the leveled manifest generations
  *
@@ -68,7 +70,7 @@ class LeveledGenerations
      */
     private final Map<SSTableReader, SSTableReader> allSSTables = new HashMap<>();
     private final Set<SSTableReader> l0 = new HashSet<>();
-    private static long lastOverlapCheck = System.nanoTime();
+    private static long lastOverlapCheck = nanoTime();
     // note that since l0 is broken out, levels[0] represents L1:
     private final TreeSet<SSTableReader> [] levels = new TreeSet[MAX_LEVEL_COUNT - 1];
 
@@ -226,6 +228,14 @@ class LeveledGenerations
         return counts;
     }
 
+    long[] getAllLevelSizeBytes()
+    {
+        long[] sums = new long[levelCount()];
+        for (int i = 0; i < sums.length; i++)
+            sums[i] = get(i).stream().map(SSTableReader::onDiskLength).reduce(0L, Long::sum);
+        return sums;
+    }
+
     Set<SSTableReader> allSSTables()
     {
         ImmutableSet.Builder<SSTableReader> builder = ImmutableSet.builder();
@@ -302,10 +312,10 @@ class LeveledGenerations
      */
     private void maybeVerifyLevels()
     {
-        if (!strictLCSChecksTest || System.nanoTime() - lastOverlapCheck <= TimeUnit.NANOSECONDS.convert(5, TimeUnit.SECONDS))
+        if (!strictLCSChecksTest || nanoTime() - lastOverlapCheck <= TimeUnit.NANOSECONDS.convert(5, TimeUnit.SECONDS))
             return;
         logger.info("LCS verifying levels");
-        lastOverlapCheck = System.nanoTime();
+        lastOverlapCheck = nanoTime();
         for (int i = 1; i < levelCount(); i++)
         {
             SSTableReader prev = null;

@@ -22,10 +22,8 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
@@ -42,7 +40,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.StreamCoordinator;
-import org.apache.cassandra.streaming.DefaultConnectionFactory;
+import org.apache.cassandra.streaming.async.NettyStreamingConnectionFactory;
 import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.streaming.StreamSession;
@@ -136,14 +134,14 @@ public class LocalSyncTaskTest extends AbstractRepairTest
         TreeResponse r2 = new TreeResponse(InetAddressAndPort.getByName("127.0.0.2"), tree2);
         LocalSyncTask task = new LocalSyncTask(desc, r1.endpoint, r2.endpoint, MerkleTrees.difference(r1.trees, r2.trees),
                                                NO_PENDING_REPAIR, true, true, PreviewKind.NONE);
-        DefaultConnectionFactory.MAX_CONNECT_ATTEMPTS = 1;
+        NettyStreamingConnectionFactory.MAX_CONNECT_ATTEMPTS = 1;
         try
         {
             task.run();
         }
         finally
         {
-            DefaultConnectionFactory.MAX_CONNECT_ATTEMPTS = 3;
+            NettyStreamingConnectionFactory.MAX_CONNECT_ATTEMPTS = 3;
         }
 
         // ensure that the changed range was recorded
@@ -199,7 +197,7 @@ public class LocalSyncTaskTest extends AbstractRepairTest
      * Don't reciprocate streams if the other endpoint is a transient replica
      */
     @Test
-    public void transientRemoteStreamPlan()
+    public void transientRemoteStreamPlan() throws NoSuchRepairSessionException
     {
         UUID sessionID = registerSession(cfs, true, true);
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(sessionID);
@@ -218,7 +216,7 @@ public class LocalSyncTaskTest extends AbstractRepairTest
      * Don't request streams if the other endpoint is a transient replica
      */
     @Test
-    public void transientLocalStreamPlan()
+    public void transientLocalStreamPlan() throws NoSuchRepairSessionException
     {
         UUID sessionID = registerSession(cfs, true, true);
         ActiveRepairService.ParentRepairSession prs = ActiveRepairService.instance.getParentRepairSession(sessionID);
@@ -235,10 +233,10 @@ public class LocalSyncTaskTest extends AbstractRepairTest
 
     private MerkleTrees createInitialTree(RepairJobDesc desc, IPartitioner partitioner)
     {
-        MerkleTrees tree = new MerkleTrees(partitioner);
-        tree.addMerkleTrees((int) Math.pow(2, 15), desc.ranges);
-        tree.init();
-        return tree;
+        MerkleTrees trees = new MerkleTrees(partitioner);
+        trees.addMerkleTrees((int) Math.pow(2, 15), desc.ranges);
+        trees.init();
+        return trees;
     }
 
     private MerkleTrees createInitialTree(RepairJobDesc desc)

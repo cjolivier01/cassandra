@@ -38,19 +38,22 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
+import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
+import org.apache.cassandra.concurrent.ExecutorFactory;
+import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RepairException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -73,7 +76,10 @@ import org.apache.cassandra.utils.asserts.SyncTaskListAssert;
 import static org.apache.cassandra.utils.asserts.SyncTaskAssert.assertThat;
 import static org.apache.cassandra.utils.asserts.SyncTaskListAssert.assertThat;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class RepairJobTest
 {
@@ -113,11 +119,13 @@ public class RepairJobTest
             super(parentRepairSession, id, commonRange, keyspace, parallelismDegree, isIncremental, pullRepair, previewKind, optimiseStreams, cfnames);
         }
 
-        protected DebuggableThreadPoolExecutor createExecutor()
+        protected ExecutorPlus createExecutor()
         {
-            DebuggableThreadPoolExecutor executor = super.createExecutor();
-            executor.setKeepAliveTime(THREAD_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
-            return executor;
+            return ExecutorFactory.Global.executorFactory()
+                    .configurePooled("RepairJobTask", Integer.MAX_VALUE)
+                    .withDefaultThreadGroup()
+                    .withKeepAlive(THREAD_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                    .build();
         }
 
         @Override
@@ -176,7 +184,7 @@ public class RepairJobTest
         this.sessionJobDesc = new RepairJobDesc(session.parentRepairSession, session.getId(),
                                                 session.keyspace, CF, session.ranges());
 
-        FBUtilities.setBroadcastInetAddress(addr1.address);
+        FBUtilities.setBroadcastInetAddress(addr1.getAddress());
     }
 
     @After
@@ -288,6 +296,34 @@ public class RepairJobTest
             .hasSize(2)
             .extracting(Message::verb)
             .containsOnly(Verb.SYNC_REQ);
+    }
+
+    @Test
+    public void testValidationFailure() throws InterruptedException, TimeoutException
+    {
+        Map<InetAddressAndPort, MerkleTrees> mockTrees = new HashMap<>();
+        mockTrees.put(addr1, createInitialTree(false));
+        mockTrees.put(addr2, createInitialTree(false));
+        mockTrees.put(addr3, null);
+
+        interceptRepairMessages(mockTrees, new ArrayList<>());
+
+        try 
+        {
+            job.run();
+            job.get(TEST_TIMEOUT_S, TimeUnit.SECONDS);
+            fail("The repair job should have failed on a simulated validation error.");
+        }
+        catch (ExecutionException e)
+        {
+            Assertions.assertThat(e.getCause()).isInstanceOf(RepairException.class);
+        }
+
+        // When the job fails, all three outstanding validation tasks should be aborted.
+        List<ValidationTask> tasks = job.validationTasks;
+        assertEquals(3, tasks.size());
+        assertFalse(tasks.stream().anyMatch(ValidationTask::isActive));
+        assertFalse(tasks.stream().allMatch(ValidationTask::isDone));
     }
 
     @Test
@@ -525,7 +561,7 @@ public class RepairJobTest
         for (InetAddressAndPort local : new InetAddressAndPort[]{ addr1, addr2, addr3 })
         {
             FBUtilities.reset();
-            FBUtilities.setBroadcastInetAddress(local.address);
+            FBUtilities.setBroadcastInetAddress(local.getAddress());
             testLocalSyncWithTransient(local, false);
         }
     }
@@ -536,7 +572,7 @@ public class RepairJobTest
         for (InetAddressAndPort local : new InetAddressAndPort[]{ addr1, addr2, addr3 })
         {
             FBUtilities.reset();
-            FBUtilities.setBroadcastInetAddress(local.address);
+            FBUtilities.setBroadcastInetAddress(local.getAddress());
             testLocalSyncWithTransient(local, true);
         }
     }
@@ -592,7 +628,7 @@ public class RepairJobTest
 
     private static void testLocalAndRemoteTransient(boolean pullRepair)
     {
-        FBUtilities.setBroadcastInetAddress(addr4.address);
+        FBUtilities.setBroadcastInetAddress(addr4.getAddress());
         List<TreeResponse> treeResponses = Arrays.asList(treeResponse(addr1, RANGE_1, "one", RANGE_2, "one", RANGE_3, "one"),
                                                          treeResponse(addr2, RANGE_1, "two", RANGE_2, "two", RANGE_3, "two"),
                                                          treeResponse(addr3, RANGE_1, "three", RANGE_2, "three", RANGE_3, "three"),
@@ -786,19 +822,19 @@ public class RepairJobTest
 
     private MerkleTrees createInitialTree(boolean invalidate)
     {
-        MerkleTrees tree = new MerkleTrees(MURMUR3_PARTITIONER);
-        tree.addMerkleTrees((int) Math.pow(2, 15), FULL_RANGE);
-        tree.init();
+        MerkleTrees trees = new MerkleTrees(MURMUR3_PARTITIONER);
+        trees.addMerkleTrees((int) Math.pow(2, 15), FULL_RANGE);
+        trees.init();
 
         if (invalidate)
         {
             // change a range in one of the trees
             Token token = MURMUR3_PARTITIONER.midpoint(FULL_RANGE.get(0).left, FULL_RANGE.get(0).right);
-            tree.invalidate(token);
-            tree.get(token).hash("non-empty hash!".getBytes());
+            trees.invalidate(token);
+            trees.get(token).hash("non-empty hash!".getBytes());
         }
 
-        return tree;
+        return trees;
     }
 
     private void interceptRepairMessages(Map<InetAddressAndPort, MerkleTrees> mockTrees,

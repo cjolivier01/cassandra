@@ -17,11 +17,12 @@
  */
 package org.apache.cassandra.db;
 
-import java.io.File;
 import java.io.IOError;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -36,7 +37,8 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
-import com.google.common.util.concurrent.ListenableFuture;
+
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,13 +60,13 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.*;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.concurrent.Future;
 
 import static java.lang.String.format;
 import static java.util.Collections.emptyMap;
@@ -72,6 +74,8 @@ import static java.util.Collections.singletonMap;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 public final class SystemKeyspace
 {
@@ -493,7 +497,7 @@ public final class SystemKeyspace
                             snitch.getLocalDatacenter(),
                             snitch.getLocalRack(),
                             DatabaseDescriptor.getPartitioner().getClass().getName(),
-                            DatabaseDescriptor.getRpcAddress(),
+                            FBUtilities.getJustBroadcastNativeAddress(),
                             DatabaseDescriptor.getNativeTransportPort(),
                             FBUtilities.getJustBroadcastAddress(),
                             DatabaseDescriptor.getStoragePort(),
@@ -713,9 +717,9 @@ public final class SystemKeyspace
             return;
 
         String req = "INSERT INTO system.%s (peer, tokens) VALUES (?, ?)";
-        executeInternal(String.format(req, LEGACY_PEERS), ep.address, tokensAsSet(tokens));
+        executeInternal(String.format(req, LEGACY_PEERS), ep.getAddress(), tokensAsSet(tokens));
         req = "INSERT INTO system.%s (peer, peer_port, tokens) VALUES (?, ?, ?)";
-        executeInternal(String.format(req, PEERS_V2), ep.address, ep.port, tokensAsSet(tokens));
+        executeInternal(String.format(req, PEERS_V2), ep.getAddress(), ep.getPort(), tokensAsSet(tokens));
     }
 
     public static synchronized boolean updatePreferredIP(InetAddressAndPort ep, InetAddressAndPort preferred_ip)
@@ -724,9 +728,9 @@ public final class SystemKeyspace
             return false;
 
         String req = "INSERT INTO system.%s (peer, preferred_ip) VALUES (?, ?)";
-        executeInternal(String.format(req, LEGACY_PEERS), ep.address, preferred_ip.address);
+        executeInternal(String.format(req, LEGACY_PEERS), ep.getAddress(), preferred_ip.getAddress());
         req = "INSERT INTO system.%s (peer, peer_port, preferred_ip, preferred_port) VALUES (?, ?, ?, ?)";
-        executeInternal(String.format(req, PEERS_V2), ep.address, ep.port, preferred_ip.address, preferred_ip.port);
+        executeInternal(String.format(req, PEERS_V2), ep.getAddress(), ep.getPort(), preferred_ip.getAddress(), preferred_ip.getPort());
         forceBlockingFlush(LEGACY_PEERS, PEERS_V2);
         return true;
     }
@@ -737,14 +741,14 @@ public final class SystemKeyspace
             return;
 
         String req = "INSERT INTO system.%s (peer, %s) VALUES (?, ?)";
-        executeInternal(String.format(req, LEGACY_PEERS, columnName), ep.address, value);
+        executeInternal(String.format(req, LEGACY_PEERS, columnName), ep.getAddress(), value);
         //This column doesn't match across the two tables
         if (columnName.equals("rpc_address"))
         {
             columnName = "native_address";
         }
         req = "INSERT INTO system.%s (peer, peer_port, %s) VALUES (?, ?, ?)";
-        executeInternal(String.format(req, PEERS_V2, columnName), ep.address, ep.port, value);
+        executeInternal(String.format(req, PEERS_V2, columnName), ep.getAddress(), ep.getPort(), value);
     }
 
     public static synchronized void updatePeerNativeAddress(InetAddressAndPort ep, InetAddressAndPort address)
@@ -753,9 +757,9 @@ public final class SystemKeyspace
             return;
 
         String req = "INSERT INTO system.%s (peer, rpc_address) VALUES (?, ?)";
-        executeInternal(String.format(req, LEGACY_PEERS), ep.address, address.address);
+        executeInternal(String.format(req, LEGACY_PEERS), ep.getAddress(), address.getAddress());
         req = "INSERT INTO system.%s (peer, peer_port, native_address, native_port) VALUES (?, ?, ?, ?)";
-        executeInternal(String.format(req, PEERS_V2), ep.address, ep.port, address.address, address.port);
+        executeInternal(String.format(req, PEERS_V2), ep.getAddress(), ep.getPort(), address.getAddress(), address.getPort());
     }
 
 
@@ -763,9 +767,9 @@ public final class SystemKeyspace
     {
         // with 30 day TTL
         String req = "UPDATE system.%s USING TTL 2592000 SET hints_dropped[ ? ] = ? WHERE peer = ?";
-        executeInternal(String.format(req, LEGACY_PEER_EVENTS), timePeriod, value, ep.address);
+        executeInternal(String.format(req, LEGACY_PEER_EVENTS), timePeriod, value, ep.getAddress());
         req = "UPDATE system.%s USING TTL 2592000 SET hints_dropped[ ? ] = ? WHERE peer = ? AND peer_port = ?";
-        executeInternal(String.format(req, PEER_EVENTS_V2), timePeriod, value, ep.address, ep.port);
+        executeInternal(String.format(req, PEER_EVENTS_V2), timePeriod, value, ep.getAddress(), ep.getPort());
     }
 
     public static synchronized void updateSchemaVersion(UUID version)
@@ -797,12 +801,12 @@ public final class SystemKeyspace
     /**
      * Remove stored tokens being used by another node
      */
-    public static synchronized void removeEndpoint(InetAddressAndPort ep)
+    public static synchronized void removeEndpoint(InetSocketAddress ep)
     {
         String req = "DELETE FROM system.%s WHERE peer = ?";
-        executeInternal(String.format(req, LEGACY_PEERS), ep.address);
+        executeInternal(String.format(req, LEGACY_PEERS), ep.getAddress());
         req = String.format("DELETE FROM system.%s WHERE peer = ? AND peer_port = ?", PEERS_V2);
-        executeInternal(req, ep.address, ep.port);
+        executeInternal(req, ep.getAddress(), ep.getPort());
         forceBlockingFlush(LEGACY_PEERS, PEERS_V2);
     }
 
@@ -826,7 +830,7 @@ public final class SystemKeyspace
     {
         if (!DatabaseDescriptor.isUnsafeSystem())
         {
-            List<ListenableFuture<CommitLogPosition>> futures = new ArrayList<>();
+            List<Future<CommitLogPosition>> futures = new ArrayList<>();
 
             for (String cfname : cfnames)
             {
@@ -884,7 +888,7 @@ public final class SystemKeyspace
     public static InetAddressAndPort getPreferredIP(InetAddressAndPort ep)
     {
         String req = "SELECT preferred_ip, preferred_port FROM system.%s WHERE peer=? AND peer_port = ?";
-        UntypedResultSet result = executeInternal(String.format(req, PEERS_V2), ep.address, ep.port);
+        UntypedResultSet result = executeInternal(String.format(req, PEERS_V2), ep.getAddress(), ep.getPort());
         if (!result.isEmpty() && result.one().has("preferred_ip"))
         {
             UntypedResultSet.Row row = result.one();
@@ -931,7 +935,7 @@ public final class SystemKeyspace
                 return CURRENT_VERSION;
             }
             String req = "SELECT release_version FROM system.%s WHERE peer=? AND peer_port=?";
-            UntypedResultSet result = executeInternal(String.format(req, PEERS_V2), ep.address, ep.port);
+            UntypedResultSet result = executeInternal(String.format(req, PEERS_V2), ep.getAddress(), ep.getPort());
             if (result != null && result.one().has("release_version"))
             {
                 return new CassandraVersion(result.one().getString("release_version"));
@@ -1007,13 +1011,13 @@ public final class SystemKeyspace
             // seconds-since-epoch isn't a foolproof new generation
             // (where foolproof is "guaranteed to be larger than the last one seen at this ip address"),
             // but it's as close as sanely possible
-            generation = (int) (System.currentTimeMillis() / 1000);
+            generation = (int) (currentTimeMillis() / 1000);
         }
         else
         {
             // Other nodes will ignore gossip messages about a node that have a lower generation than previously seen.
             final int storedGeneration = result.one().getInt("gossip_generation") + 1;
-            final int now = (int) (System.currentTimeMillis() / 1000);
+            final int now = (int) (currentTimeMillis() / 1000);
             if (storedGeneration >= now)
             {
                 logger.warn("Using stored Gossip Generation {} as it is greater than current system time {}.  See CASSANDRA-3654 if you experience problems",
@@ -1126,13 +1130,15 @@ public final class SystemKeyspace
             return hostId;
 
         // ID not found, generate a new one, persist, and then return it.
-        hostId = UUID.randomUUID();
+        String hostString = System.getProperty("cassandra.host_id_first_boot", UUID.randomUUID().toString());
+        hostId = UUID.fromString(hostString);
         logger.warn("No host ID found, created {} (Note: This should happen exactly once per node).", hostId);
         return setLocalHostId(hostId);
     }
 
     /**
-     * Sets the local host ID explicitly.  Should only be called outside of SystemTable when replacing a node.
+     * Sets the local host ID explicitly. Should only be called outside of SystemTable when replacing a node.
+     * Used also in CASSANDRA-14582.
      */
     public static synchronized UUID setLocalHostId(UUID hostId)
     {
@@ -1174,7 +1180,7 @@ public final class SystemKeyspace
     public static PaxosState loadPaxosState(DecoratedKey key, TableMetadata metadata, int nowInSec)
     {
         String req = "SELECT * FROM system.%s WHERE row_key = ? AND cf_id = ?";
-        UntypedResultSet results = QueryProcessor.executeInternalWithNow(nowInSec, System.nanoTime(), format(req, PAXOS), key.getKey(), metadata.id.asUUID());
+        UntypedResultSet results = QueryProcessor.executeInternalWithNow(nowInSec, nanoTime(), format(req, PAXOS), key.getKey(), metadata.id.asUUID());
         if (results.isEmpty())
             return new PaxosState(key, metadata);
         UntypedResultSet.Row row = results.one();
@@ -1423,9 +1429,9 @@ public final class SystemKeyspace
         {
             rangesToUpdate.add(rangeToBytes(range));
         }
-        executeInternal(format(cql, LEGACY_TRANSFERRED_RANGES), rangesToUpdate, streamOperation.getDescription(), peer.address, keyspace);
+        executeInternal(format(cql, LEGACY_TRANSFERRED_RANGES), rangesToUpdate, streamOperation.getDescription(), peer.getAddress(), keyspace);
         cql = "UPDATE system.%s SET ranges = ranges + ? WHERE operation = ? AND peer = ? AND peer_port = ? AND keyspace_name = ?";
-        executeInternal(String.format(cql, TRANSFERRED_RANGES_V2), rangesToUpdate, streamOperation.getDescription(), peer.address, peer.port, keyspace);
+        executeInternal(String.format(cql, TRANSFERRED_RANGES_V2), rangesToUpdate, streamOperation.getDescription(), peer.getAddress(), peer.getPort(), keyspace);
     }
 
     public static synchronized Map<InetAddressAndPort, Set<Range<Token>>> getTransferredRanges(String description, String keyspace, IPartitioner partitioner)
@@ -1471,8 +1477,10 @@ public final class SystemKeyspace
             String snapshotName = Keyspace.getTimestampedSnapshotName(format("upgrade-%s-%s",
                                                                              previous,
                                                                              next));
+
+            Instant creationTime = Instant.now();
             for (String keyspace : SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES)
-                Keyspace.open(keyspace).snapshot(snapshotName, null, false, null);
+                Keyspace.open(keyspace).snapshot(snapshotName, null, false, null, null, creationTime);
         }
     }
 
@@ -1499,7 +1507,7 @@ public final class SystemKeyspace
             // from there, but it informs us that this isn't a completely new node.
             for (File dataDirectory : Directories.getKSChildDirectories(SchemaConstants.SYSTEM_KEYSPACE_NAME))
             {
-                if (dataDirectory.getName().equals("Versions") && dataDirectory.listFiles().length > 0)
+                if (dataDirectory.name().equals("Versions") && dataDirectory.tryList().length > 0)
                 {
                     logger.trace("Found unreadable versions info in pre 1.2 system.Versions table");
                     return UNREADABLE_VERSION.toString();

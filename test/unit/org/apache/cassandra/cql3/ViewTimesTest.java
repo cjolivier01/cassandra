@@ -287,15 +287,15 @@ public class ViewTimesTest extends ViewAbstractTest
                     "c int, " +
                     "val int) WITH default_time_to_live = 60");
 
+        createView("mv_ttl2", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (k,c)");
+
         execute("USE " + keyspace());
         executeNet("USE " + keyspace());
-
-        createView("mv_ttl2", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL PRIMARY KEY (k,c)");
 
         // Must NOT include "default_time_to_live" on alter Materialized View
         try
         {
-            executeNet("ALTER MATERIALIZED VIEW " + keyspace()+ ".mv_ttl2 WITH default_time_to_live = 30");
+            executeNet("ALTER MATERIALIZED VIEW " + keyspace() + ".mv_ttl2 WITH default_time_to_live = 30");
             Assert.fail("Should fail if TTL is provided while altering materialized view");
         }
         catch (Exception e)

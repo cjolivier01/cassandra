@@ -39,6 +39,7 @@ import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.impl.Instance;
 import org.apache.cassandra.distributed.shared.DistributedTestBase;
+import org.apache.cassandra.distributed.shared.ThrowingRunnable;
 import org.apache.cassandra.distributed.shared.Versions;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -83,13 +84,15 @@ public class UpgradeTestBase extends DistributedTestBase
     public static final Semver v30 = new Semver("3.0.0-alpha1", SemverType.LOOSE);
     public static final Semver v3X = new Semver("3.11.0", SemverType.LOOSE);
     public static final Semver v40 = new Semver("4.0-alpha1", SemverType.LOOSE);
+    public static final Semver v41 = new Semver("4.1-alpha1", SemverType.LOOSE);
 
     protected static final List<Pair<Semver,Semver>> SUPPORTED_UPGRADE_PATHS = ImmutableList.of(
         Pair.create(v22, v30),
         Pair.create(v22, v3X),
         Pair.create(v30, v3X),
         Pair.create(v30, v40),
-        Pair.create(v3X, v40));
+        Pair.create(v3X, v40),
+        Pair.create(v40, v41));
 
     // the last is always the current
     public static final Semver CURRENT = SUPPORTED_UPGRADE_PATHS.get(SUPPORTED_UPGRADE_PATHS.size() - 1).right;
@@ -106,7 +109,7 @@ public class UpgradeTestBase extends DistributedTestBase
         }
     }
 
-    public static class TestCase implements Instance.ThrowingRunnable
+    public static class TestCase implements ThrowingRunnable
     {
         private final Versions versions;
         private final List<TestVersions> upgrade = new ArrayList<>();

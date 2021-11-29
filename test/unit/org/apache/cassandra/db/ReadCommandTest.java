@@ -84,6 +84,7 @@ import org.apache.cassandra.utils.UUIDGen;
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -233,7 +234,7 @@ public class ReadCommandTest
     }
 
     @Test
-    public void testSinglePartitionSliceAbort() throws Exception
+    public void testSinglePartitionSliceAbort()
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2);
 
@@ -264,7 +265,7 @@ public class ReadCommandTest
     }
 
     @Test
-    public void testSinglePartitionNamesAbort() throws Exception
+    public void testSinglePartitionNamesAbort()
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2);
 
@@ -671,7 +672,7 @@ public class ReadCommandTest
         cfs.forceBlockingFlush();
         List<SSTableReader> sstables = new ArrayList<>(cfs.getLiveSSTables());
         assertEquals(2, sstables.size());
-        Collections.sort(sstables, SSTableReader.maxTimestampDescending);
+        sstables.sort(SSTableReader.maxTimestampDescending);
 
         ReadCommand readCommand = Util.cmd(cfs, Util.dk("key")).includeRow("dd").columns("a").build();
 
@@ -689,7 +690,7 @@ public class ReadCommandTest
     }
 
     @Test
-    public void dontIncludeLegacyCounterContextInDigest() throws IOException
+    public void dontIncludeLegacyCounterContextInDigest()
     {
         // Serializations of a CounterContext containing legacy (pre-2.1) shards
         // can legitimately differ across replicas. For this reason, the context
@@ -713,7 +714,7 @@ public class ReadCommandTest
         // execute a read and capture the digest
         ReadCommand readCommand = Util.cmd(cfs, Util.dk("key")).build();
         ByteBuffer digestWithLegacyCounter0 = performReadAndVerifyRepairedInfo(readCommand, 1, 1, true);
-        assertFalse(EMPTY_BYTE_BUFFER.equals(digestWithLegacyCounter0));
+        assertNotEquals(EMPTY_BYTE_BUFFER, digestWithLegacyCounter0);
 
         // truncate, then re-insert the same partition, but this time with a legacy
         // shard having the value 1. The repaired digest should match the previous, as
@@ -743,9 +744,9 @@ public class ReadCommandTest
         cfs.getLiveSSTables().forEach(sstable -> mutateRepaired(cfs, sstable, 111, null));
 
         ByteBuffer digestWithCounterCell = performReadAndVerifyRepairedInfo(readCommand, 1, 1, true);
-        assertFalse(EMPTY_BYTE_BUFFER.equals(digestWithCounterCell));
-        assertFalse(digestWithLegacyCounter0.equals(digestWithCounterCell));
-        assertFalse(digestWithLegacyCounter1.equals(digestWithCounterCell));
+        assertNotEquals(EMPTY_BYTE_BUFFER, digestWithCounterCell);
+        assertNotEquals(digestWithLegacyCounter0, digestWithCounterCell);
+        assertNotEquals(digestWithLegacyCounter1, digestWithCounterCell);
     }
 
     /**
@@ -756,7 +757,7 @@ public class ReadCommandTest
      * Also, neither digest should be empty as the partition is not made empty by the purging.
      */
     @Test
-    public void purgeGCableTombstonesBeforeCalculatingDigest() throws Exception
+    public void purgeGCableTombstonesBeforeCalculatingDigest()
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF8);
         cfs.truncateBlocking();
@@ -765,7 +766,6 @@ public class ReadCommandTest
 
         DecoratedKey[] keys = new DecoratedKey[] { Util.dk("key0"), Util.dk("key1"), Util.dk("key2"), Util.dk("key3") };
         int nowInSec = FBUtilities.nowInSeconds();
-        TableMetadata cfm = cfs.metadata();
 
         // A simple tombstone
         new RowUpdateBuilder(cfs.metadata(), 0, keys[0]).clustering("cc").delete("a").build().apply();
@@ -975,7 +975,7 @@ public class ReadCommandTest
      * the row deletion is eligible for purging, both the result set and the repaired data digest should
      * be empty.
      */
-    private void fullyPurgedPartitionCreatesEmptyDigest(ColumnFamilyStore cfs, ReadCommand command) throws Exception
+    private void fullyPurgedPartitionCreatesEmptyDigest(ColumnFamilyStore cfs, ReadCommand command)
     {
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
@@ -1067,7 +1067,7 @@ public class ReadCommandTest
     }
 
     @Test
-    public void purgingConsidersRepairedDataOnly() throws Exception
+    public void purgingConsidersRepairedDataOnly()
     {
         // 2 sstables, first is repaired and contains data that is all purgeable
         // the second is unrepaired and contains non-purgable data. Even though
@@ -1191,7 +1191,20 @@ public class ReadCommandTest
                                                            ReplicaUtils.full(addr, token)));
     }
 
-    private void testRepairedDataTracking(ColumnFamilyStore cfs, ReadCommand readCommand) throws IOException
+    @Test
+    public void testToCQLString()
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2);
+        DecoratedKey key = Util.dk("key");
+
+        ReadCommand readCommand = Util.cmd(cfs, key).build();
+
+        String result = readCommand.toCQLString();
+
+        assertEquals(result, String.format("SELECT * FROM \"ReadCommandTest\".\"Standard2\" WHERE key = 0x%s ALLOW FILTERING", ByteBufferUtil.bytesToHex(key.getKey())));
+    }
+
+    private void testRepairedDataTracking(ColumnFamilyStore cfs, ReadCommand readCommand)
     {
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();

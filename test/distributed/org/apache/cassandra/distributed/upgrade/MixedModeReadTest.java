@@ -39,9 +39,9 @@ public class MixedModeReadTest extends UpgradeTestBase
         .withConfig(c -> c.with(Feature.GOSSIP, Feature.NETWORK))
         .nodes(2)
         .nodesToUpgrade(1)
-        // all upgrades from v30 up, excluding v30->v3X
+        // all upgrades from v30 up, excluding v30->v3X and from v40
         .singleUpgrade(v30, v40)
-        .upgradesFrom(v3X)
+	      .singleUpgrade(v3X, v40)
         .setup(cluster -> {
             cluster.schemaChange(CREATE_TABLE);
             insertData(cluster.coordinator(1));

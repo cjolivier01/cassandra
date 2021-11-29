@@ -86,6 +86,10 @@ hints_flush_period_in_ms: 10000
 # Maximum size for a single hints file, in megabytes.
 max_hints_file_size_in_mb: 128
 
+# Enable / disable automatic cleanup for the expired and orphaned hints file.
+# Disable the option in order to preserve those hints on the disk.
+auto_hints_cleanup_enabled: false
+
 # Compression to apply to the hint files. If omitted, hints files
 # will be written uncompressed. LZ4, Snappy, and Deflate compressors
 # are supported.
@@ -93,6 +97,20 @@ max_hints_file_size_in_mb: 128
 #   - class_name: LZ4Compressor
 #     parameters:
 #         -
+
+# Enable / disable persistent hint windows.
+#
+# If set to false, a hint will be stored only in case a respective node
+# that hint is for is down less than or equal to max_hint_window_in_ms.
+#
+# If set to true, a hint will be stored in case there is not any
+# hint which was stored earlier than max_hint_window_in_ms. This is for cases
+# when a node keeps to restart and hints are not delivered yet, we would be saving
+# hints for that node indefinitely.
+#
+# Defaults to true.
+#
+# hint_window_persistent_enabled: true
 
 # Maximum throttle in KBs per second, total. This will be
 # reduced proportionally to the number of nodes in the cluster.
@@ -138,6 +156,13 @@ role_manager: CassandraRoleManager
 # - CassandraNetworkAuthorizer stores permissions in system_auth.network_permissions table. Please
 #   increase system_auth keyspace replication factor if you use this authorizer.
 network_authorizer: AllowAllNetworkAuthorizer
+
+# Depending on the auth strategy of the cluster, it can be beneficial to iterate
+# from root to table (root -> ks -> table) instead of table to root (table -> ks -> root).
+# As the auth entries are whitelisting, once a permission is found you know it to be
+# valid. We default to false as the legacy behavior is to query at the table level then
+# move back up to the root. See CASSANDRA-17016 for details.
+# traverse_auth_from_root = false
 
 # Validity period for roles cache (fetching granted roles can be an expensive
 # operation depending on the role manager, CassandraRoleManager is one example)
@@ -706,9 +731,9 @@ native_transport_port: 9042
 # native_transport_max_threads: 128
 #
 # The maximum size of allowed frame. Frame (requests) larger than this will
-# be rejected as invalid. The default is 256MB. If you're changing this parameter,
+# be rejected as invalid. The default is 16MB. If you're changing this parameter,
 # you may want to adjust max_value_size_in_mb accordingly. This should be positive and less than 2048.
-# native_transport_max_frame_size_in_mb: 256
+# native_transport_max_frame_size_in_mb: 16
 
 # The maximum number of concurrent client connections.
 # The default is -1, which means unlimited.
@@ -1301,6 +1326,9 @@ unlogged_batch_across_partitions_warn_threshold: 10
 # Log a warning when compacting partitions larger than this value
 compaction_large_partition_warning_threshold_mb: 100
 
+# Log a warning when writing more tombstones than this value to a partition
+compaction_tombstone_warning_threshold: 100000
+
 # GC Pauses greater than 200 ms will be logged at INFO level
 # This threshold can be adjusted to minimize logging if necessary
 # gc_log_threshold_in_ms: 200
@@ -1314,6 +1342,25 @@ compaction_large_partition_warning_threshold_mb: 100
 # early. Any value size larger than this threshold will result into marking an SSTable
 # as corrupted. This should be positive and less than 2048.
 # max_value_size_in_mb: 256
+
+# ** Impact on keyspace creation **
+# If replication factor is not mentioned as part of keyspace creation, default_keyspace_rf would apply.
+# Changing this configuration would only take effect for keyspaces created after the change, but does not impact
+# existing keyspaces created prior to the change.
+# ** Impact on keyspace alter **
+# When altering a keyspace from NetworkTopologyStrategy to SimpleStrategy, default_keyspace_rf is applied if rf is not
+# explicitly mentioned.
+# ** Impact on system keyspaces **
+# This would also apply for any system keyspaces that need replication factor.
+# A further note about system keyspaces - system_traces and system_distributed keyspaces take RF of 2 or default,
+# whichever is higher, and system_auth keyspace takes RF of 1 or default, whichever is higher.
+# Suggested value for use in production: 3
+# default_keyspace_rf: 1
+
+# The minimum allowable replication factor. Creating a keyspace with a replication factor less than this value will be rejected.
+# This would also apply to system keyspaces.
+# Suggested value for use in production: 2 or higher
+# minimum_keyspace_rf: 0
 
 # Coalescing Strategies #
 # Coalescing multiples messages turns out to significantly boost message processing throughput (think doubling or more).
@@ -1432,6 +1479,10 @@ report_unconfirmed_repaired_data_mismatches: false
 # table_count_warn_threshold: 150
 # keyspace_count_warn_threshold: 40
 
+# configure the read and write consistency levels for modifications to auth tables
+# auth_read_consistency_level: LOCAL_QUORUM
+# auth_write_consistency_level: EACH_QUORUM
+
 #########################
 # EXPERIMENTAL FEATURES #
 #########################
@@ -1451,3 +1502,35 @@ enable_transient_replication: false
 # Enables the used of 'ALTER ... DROP COMPACT STORAGE' statements on this node.
 # 'ALTER ... DROP COMPACT STORAGE' is considered experimental and is not recommended for production use.
 enable_drop_compact_storage: false
+
+# When the client triggers a protocol exception or unknown issue (Cassandra bug) we increment
+# a client metric showing this; this logic will exclude specific subnets from updating these
+# metrics
+#client_error_reporting_exclusions:
+#  subnets:
+#    - 127.0.0.1
+#    - 127.0.0.0/31
+
+# Enables tracking warnings/aborts across all replicas for reporting back to client.
+# See: CASSANDRA-16850
+#track_warnings:
+#	# Scheduled to enable in 4.2
+#	enabled: false
+#	# When track_warnings.enabled: true, this tracks the materialized size of a query on the
+#	# coordinator. If coordinator_large_read.warn_threshold_kb is greater than 0, this will emit a warning
+#	# to clients with details on what query triggered this as well as the size of the result set; if
+#	# coordinator_large_read.abort_threshold_kb is greater than 0, this will abort the query after it
+#	# has exceeded this threshold, returning a read error to the user.
+#	coordinator_large_read:
+#		warn_threshold_kb: 0
+#		abort_threshold_kb: 0
+#	# When track_warnings.enabled: true, this tracks the size of the local read (as defined by
+#	# heap size), and will warn/abort based off these thresholds; 0 disables these checks.
+#	local_read_size:
+#		warn_threshold_kb: 0
+#		abort_threshold_kb: 0
+#	# When track_warnings.enabled: true, this tracks the expected memory size of the RowIndexEntry
+#	# and will warn/abort based off these thresholds; 0 disables these checks.
+#	row_index_size:
+#		warn_threshold_kb: 0
+#		abort_threshold_kb: 0

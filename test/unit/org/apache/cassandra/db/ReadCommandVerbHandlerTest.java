@@ -170,7 +170,8 @@ public class ReadCommandVerbHandlerTest
                   DataLimits.NONE,
                   KEY,
                   new ClusteringIndexSliceFilter(Slices.ALL, false),
-                  null);
+                  null,
+                  false);
         }
 
         @Override

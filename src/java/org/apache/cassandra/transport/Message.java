@@ -209,7 +209,18 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
+        /**
+         * @return true if the execution of this {@link Request} should be recorded in a tracing session
+         */
         protected boolean isTraceable()
+        {
+            return false;
+        }
+
+        /**
+         * @return true if warnings should be tracked and aborts enforced for resource limits on this {@link Request}
+         */
+        protected boolean isTrackable()
         {
             return false;
         }
@@ -319,9 +330,16 @@ public abstract class Message
                 List<String> warnings = message.getWarnings();
                 if (warnings != null)
                 {
+                    // if cassandra populates warnings for <= v3 protocol, this is a bug
                     if (version.isSmallerThan(ProtocolVersion.V4))
-                        throw new ProtocolException("Must not send frame with WARNING flag for native protocol version < 4");
-                    messageSize += CBUtil.sizeOfStringList(warnings);
+                    {
+                        logger.warn("Warnings present in message with version less than v4 (it is {}); warnings={}", version, warnings);
+                        warnings = null;
+                    }
+                    else
+                    {
+                        messageSize += CBUtil.sizeOfStringList(warnings);
+                    }
                 }
                 if (customPayload != null)
                 {

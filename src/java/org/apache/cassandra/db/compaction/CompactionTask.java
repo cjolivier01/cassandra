@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db.compaction;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -45,6 +46,9 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.Refs;
+
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 public class CompactionTask extends AbstractCompactionTask
 {
@@ -115,7 +119,11 @@ public class CompactionTask extends AbstractCompactionTask
         CompactionStrategyManager strategy = cfs.getCompactionStrategyManager();
 
         if (DatabaseDescriptor.isSnapshotBeforeCompaction())
-            cfs.snapshotWithoutFlush(System.currentTimeMillis() + "-compact-" + cfs.name);
+        {
+            long epochMilli = currentTimeMillis();
+            Instant creationTime = Instant.ofEpochMilli(epochMilli);
+            cfs.snapshotWithoutFlush(epochMilli + "-compact-" + cfs.name, creationTime);
+        }
 
         try (CompactionController controller = getCompactionController(transaction.originals()))
         {
@@ -150,11 +158,12 @@ public class CompactionTask extends AbstractCompactionTask
             logger.info("Compacting ({}) {}", taskId, ssTableLoggerMsg);
 
             RateLimiter limiter = CompactionManager.instance.getRateLimiter();
-            long start = System.nanoTime();
-            long startTime = System.currentTimeMillis();
+            long start = nanoTime();
+            long startTime = currentTimeMillis();
             long totalKeysWritten = 0;
             long estimatedKeys = 0;
             long inputSizeBytes;
+            long timeSpentWritingKeys;
 
             Set<SSTableReader> actuallyCompact = Sets.difference(transaction.originals(), fullyExpiredSSTables);
             Collection<SSTableReader> newSStables;
@@ -193,20 +202,20 @@ public class CompactionTask extends AbstractCompactionTask
                         if (writer.append(ci.next()))
                             totalKeysWritten++;
 
-
                         long bytesScanned = scanners.getTotalBytesScanned();
 
-                        //Rate limit the scanners, and account for compression
+                        // Rate limit the scanners, and account for compression
                         CompactionManager.compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio);
 
                         lastBytesScanned = bytesScanned;
 
-                        if (System.nanoTime() - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
+                        if (nanoTime() - lastCheckObsoletion > TimeUnit.MINUTES.toNanos(1L))
                         {
                             controller.maybeRefreshOverlaps();
-                            lastCheckObsoletion = System.nanoTime();
+                            lastCheckObsoletion = nanoTime();
                         }
                     }
+                    timeSpentWritingKeys = TimeUnit.NANOSECONDS.toMillis(nanoTime() - start);
 
                     // point of no return
                     newSStables = writer.finish();
@@ -223,7 +232,7 @@ public class CompactionTask extends AbstractCompactionTask
                 return;
 
             // log a bunch of statistics about the result and save to system table compaction_history
-            long durationInNano = System.nanoTime() - start;
+            long durationInNano = nanoTime() - start;
             long dTime = TimeUnit.NANOSECONDS.toMillis(durationInNano);
             long startsize = inputSizeBytes;
             long endsize = SSTableReader.getTotalBytes(newSStables);
@@ -238,7 +247,7 @@ public class CompactionTask extends AbstractCompactionTask
 
             String mergeSummary = updateCompactionHistory(cfs.keyspace.getName(), cfs.getTableName(), mergedRowCounts, startsize, endsize);
 
-            logger.info(String.format("Compacted (%s) %d sstables to [%s] to level=%d.  %s to %s (~%d%% of original) in %,dms.  Read Throughput = %s, Write Throughput = %s, Row Throughput = ~%,d/s.  %,d total partitions merged to %,d.  Partition merge counts were {%s}",
+            logger.info(String.format("Compacted (%s) %d sstables to [%s] to level=%d.  %s to %s (~%d%% of original) in %,dms.  Read Throughput = %s, Write Throughput = %s, Row Throughput = ~%,d/s.  %,d total partitions merged to %,d.  Partition merge counts were {%s}. Time spent writing keys = %,dms",
                                        taskId,
                                        transaction.originals().size(),
                                        newSSTableNames.toString(),
@@ -252,13 +261,14 @@ public class CompactionTask extends AbstractCompactionTask
                                        (int) totalSourceCQLRows / (TimeUnit.NANOSECONDS.toSeconds(durationInNano) + 1),
                                        totalSourceRows,
                                        totalKeysWritten,
-                                       mergeSummary));
+                                       mergeSummary,
+                                       timeSpentWritingKeys));
             if (logger.isTraceEnabled())
             {
                 logger.trace("CF Total Bytes Compacted: {}", FBUtilities.prettyPrintMemory(CompactionTask.addToTotalBytesCompacted(endsize)));
                 logger.trace("Actual #keys: {}, Estimated #keys:{}, Err%: {}", totalKeysWritten, estimatedKeys, ((double)(totalKeysWritten - estimatedKeys)/totalKeysWritten));
             }
-            cfs.getCompactionStrategyManager().compactionLogger.compaction(startTime, transaction.originals(), System.currentTimeMillis(), newSStables);
+            cfs.getCompactionStrategyManager().compactionLogger.compaction(startTime, transaction.originals(), currentTimeMillis(), newSStables);
 
             // update the metrics
             cfs.metric.compactionBytesWritten.inc(endsize);
@@ -288,7 +298,7 @@ public class CompactionTask extends AbstractCompactionTask
             mergeSummary.append(String.format("%d:%d, ", rows, count));
             mergedRows.put(rows, count);
         }
-        SystemKeyspace.updateCompactionHistory(keyspaceName, columnFamilyName, System.currentTimeMillis(), startSize, endSize, mergedRows);
+        SystemKeyspace.updateCompactionHistory(keyspaceName, columnFamilyName, currentTimeMillis(), startSize, endSize, mergedRows);
         return mergeSummary.toString();
     }
 

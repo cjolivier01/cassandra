@@ -31,8 +31,9 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.google.common.collect.Lists;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.SettableFuture;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.Promise;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -48,6 +49,7 @@ import org.apache.cassandra.net.MockMessagingService;
 import org.apache.cassandra.net.MockMessagingSpy;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.AbstractRepairTest;
+import org.apache.cassandra.repair.NoSuchRepairSessionException;
 import org.apache.cassandra.repair.RepairSessionResult;
 import org.apache.cassandra.repair.messages.FinalizePromise;
 import org.apache.cassandra.repair.messages.FinalizePropose;
@@ -92,7 +94,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
     }
 
     @Test
-    public void testMockedMessagingHappyPath() throws InterruptedException, ExecutionException, TimeoutException
+    public void testMockedMessagingHappyPath() throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         CountDownLatch prepareLatch = createLatch();
         CountDownLatch finalizeLatch = createLatch();
@@ -104,8 +106,8 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         UUID uuid = registerSession(cfs, true, true);
         CoordinatorSession coordinator = ActiveRepairService.instance.consistent.coordinated.registerSession(uuid, PARTICIPANTS, false);
         AtomicBoolean repairSubmitted = new AtomicBoolean(false);
-        SettableFuture<List<RepairSessionResult>> repairFuture = SettableFuture.create();
-        Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSupplier = () ->
+        Promise<List<RepairSessionResult>> repairFuture = AsyncPromise.uncancellable();
+        Supplier<Future<List<RepairSessionResult>>> sessionSupplier = () ->
         {
             repairSubmitted.set(true);
             return repairFuture;
@@ -116,7 +118,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         Assert.assertFalse(repairSubmitted.get());
 
         // execute repair and start prepare phase
-        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        Future<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures);
         Assert.assertFalse(sessionResult.isDone());
         Assert.assertFalse(hasFailures.get());
         // prepare completed
@@ -126,7 +128,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         Assert.assertFalse(hasFailures.get());
 
         // set result from local repair session
-        repairFuture.set(Lists.newArrayList(createResult(coordinator), createResult(coordinator), createResult(coordinator)));
+        repairFuture.trySuccess(Lists.newArrayList(createResult(coordinator), createResult(coordinator), createResult(coordinator)));
 
         // finalize phase
         finalizeLatch.countDown();
@@ -148,7 +150,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
 
 
     @Test
-    public void testMockedMessagingPrepareFailureP1() throws InterruptedException, ExecutionException, TimeoutException
+    public void testMockedMessagingPrepareFailureP1() throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         CountDownLatch latch = createLatch();
         createPrepareSpy(Collections.singleton(PARTICIPANT1), Collections.emptySet(), latch);
@@ -156,7 +158,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
     }
 
     @Test
-    public void testMockedMessagingPrepareFailureP12() throws InterruptedException, ExecutionException, TimeoutException
+    public void testMockedMessagingPrepareFailureP12() throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         CountDownLatch latch = createLatch();
         createPrepareSpy(Lists.newArrayList(PARTICIPANT1, PARTICIPANT2), Collections.emptySet(), latch);
@@ -164,7 +166,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
     }
 
     @Test
-    public void testMockedMessagingPrepareFailureP3() throws InterruptedException, ExecutionException, TimeoutException
+    public void testMockedMessagingPrepareFailureP3() throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         CountDownLatch latch = createLatch();
         createPrepareSpy(Collections.singleton(PARTICIPANT3), Collections.emptySet(), latch);
@@ -172,7 +174,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
     }
 
     @Test
-    public void testMockedMessagingPrepareFailureP123() throws InterruptedException, ExecutionException, TimeoutException
+    public void testMockedMessagingPrepareFailureP123() throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         CountDownLatch latch = createLatch();
         createPrepareSpy(Lists.newArrayList(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3), Collections.emptySet(), latch);
@@ -180,14 +182,14 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
     }
 
     @Test(expected = TimeoutException.class)
-    public void testMockedMessagingPrepareFailureWrongSessionId() throws InterruptedException, ExecutionException, TimeoutException
+    public void testMockedMessagingPrepareFailureWrongSessionId() throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         CountDownLatch latch = createLatch();
         createPrepareSpy(Collections.singleton(PARTICIPANT1), Collections.emptySet(), (msgOut) -> UUID.randomUUID(), latch);
         testMockedMessagingPrepareFailure(latch);
     }
 
-    private void testMockedMessagingPrepareFailure(CountDownLatch prepareLatch) throws InterruptedException, ExecutionException, TimeoutException
+    private void testMockedMessagingPrepareFailure(CountDownLatch prepareLatch) throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         // we expect FailSession messages to all participants
         MockMessagingSpy sendFailSessionExpectedSpy = createFailSessionSpy(Lists.newArrayList(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3));
@@ -195,8 +197,8 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         UUID uuid = registerSession(cfs, true, true);
         CoordinatorSession coordinator = ActiveRepairService.instance.consistent.coordinated.registerSession(uuid, PARTICIPANTS, false);
         AtomicBoolean repairSubmitted = new AtomicBoolean(false);
-        SettableFuture<List<RepairSessionResult>> repairFuture = SettableFuture.create();
-        Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSupplier = () ->
+        Promise<List<RepairSessionResult>> repairFuture = AsyncPromise.uncancellable();
+        Supplier<Future<List<RepairSessionResult>>> sessionSupplier = () ->
         {
             repairSubmitted.set(true);
             return repairFuture;
@@ -207,7 +209,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         Assert.assertFalse(repairSubmitted.get());
 
         // execute repair and start prepare phase
-        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, proposeFailed);
+        Future<Boolean> sessionResult = coordinator.execute(sessionSupplier, proposeFailed);
         prepareLatch.countDown();
         // prepare completed
         try
@@ -226,7 +228,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
     }
 
     @Test
-    public void testMockedMessagingPrepareTimeout() throws InterruptedException, ExecutionException, TimeoutException
+    public void testMockedMessagingPrepareTimeout() throws InterruptedException, ExecutionException, TimeoutException, NoSuchRepairSessionException
     {
         MockMessagingSpy spyPrepare = createPrepareSpy(Collections.emptySet(), Collections.singleton(PARTICIPANT3), new CountDownLatch(0));
         MockMessagingSpy sendFailSessionUnexpectedSpy = createFailSessionSpy(Lists.newArrayList(PARTICIPANT1, PARTICIPANT2, PARTICIPANT3));
@@ -234,8 +236,8 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         UUID uuid = registerSession(cfs, true, true);
         CoordinatorSession coordinator = ActiveRepairService.instance.consistent.coordinated.registerSession(uuid, PARTICIPANTS, false);
         AtomicBoolean repairSubmitted = new AtomicBoolean(false);
-        SettableFuture<List<RepairSessionResult>> repairFuture = SettableFuture.create();
-        Supplier<ListenableFuture<List<RepairSessionResult>>> sessionSupplier = () ->
+        Promise<List<RepairSessionResult>> repairFuture = AsyncPromise.uncancellable();
+        Supplier<Future<List<RepairSessionResult>>> sessionSupplier = () ->
         {
             repairSubmitted.set(true);
             return repairFuture;
@@ -246,7 +248,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         Assert.assertFalse(repairSubmitted.get());
 
         // execute repair and start prepare phase
-        ListenableFuture<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures);
+        Future<Boolean> sessionResult = coordinator.execute(sessionSupplier, hasFailures);
         try
         {
             sessionResult.get(1, TimeUnit.SECONDS);

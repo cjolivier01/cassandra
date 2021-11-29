@@ -33,9 +33,37 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
+4.1
+===
 
-4.0.2
-=====
+New features
+------------
+    - Support for multiple permission in a single GRANT/REVOKE/LIST statement has been added. It allows to
+      grant/revoke/list multiple permissions using a single statement by providing a list of comma-separated
+      permissions.
+    - A new ALL TABLES IN KEYSPACE resource has been added. It allows to grant permissions for all tables and user types
+      in a keyspace while preventing the user to use those permissions on the keyspace itself.
+    - Added support for type casting in the WHERE clause components and in the values of INSERT and UPDATE statements.
+    - Warn/abort thresholds added to read queries notifying clients when these thresholds trigger (by
+      emitting a client warning or aborting the query).  This feature is disabled by default, scheduled
+      to be enabled in 4.2; it is controlled with the configuration track_warnings.enabled,
+      setting to true will enable this feature.  Each check has its own warn/abort thresholds, currently
+      tombstones (tombstone_warn_threshold, and tombstone_failure_threshold), coordinator result set
+      materialized size (track_warnings.coordinator_large_read.warn_threshold_kb, and
+      track_warnings.coordinator_large_read.abort_threshold_kb), local read materialized heap size
+      (track_warnings.local_read_size.warn_threshold_kb and track_warnings.local_read_size.abort_threshold_kb),
+      and RowIndexEntry estimated memory size (track_warnings.row_index_size.warn_threshold_kb and
+      track_warnings.row_index_size.abort_threshold_kb) are supported; more checks will be added over time.
+    - Prior to this version, the hint system was storing a window of hints as defined by
+      configuration property max_hint_window_in_ms, however this window is not persistent across restarts.
+      For example, if a node is restarted, it will be still eligible for a hint to be sent to it because it
+      was down less than max_hint_window_in_ms. Hence if that node continues restarting without hint delivery completing,
+      hints will be sent to that node indefinitely which would occupy more and more disk space.
+      This behaviour was changed in CASSANDRA-14309. From now on, by default, if a node is not down longer than
+      max_hint_window_in_ms, there is an additional check to see if there is a hint to be delivered which is older
+      than max_window_in_ms. If there is, a hint is not persisted. If there is not, it is.
+      This behaviour might be reverted as it was in previous version by property hint_window_persistent_enabled by
+      setting it to false. This property is by default set to true.
 
 Upgrading
 ---------
@@ -43,6 +71,11 @@ Upgrading
       confirm it is set to value lower than 31 otherwise Cassandra will fail to start. See CASSANDRA-9384
       for further details. You also need to regenerate passwords for users for who the password
       was created while the above property was set to be more than 30 otherwise they will not be able to log in.
+    - Information about pending hints is now available through `nodetool listpendinghints` and `pending_hints` virtual
+      table.
+
+Deprecation
+-----------
 
 4.0
 ===
@@ -132,6 +165,9 @@ New features
       See CASSANDRA-10190 for details.
     - Support for server side DESCRIBE statements has been added. See CASSANDRA-14825
     - It is now possible to rate limit snapshot creation/clearing. See CASSANDRA-13019
+    - Authentication reads and writes have been changed from a mix of ONE, LOCAL_ONE, and QUORUM
+      to LOCAL_QUORUM on reads and EACH_QUORUM on writes. This is configurable via cassandra.yaml with
+      auth_read_consistency_level and auth_write_consistency_level respectively. See CASSANDRA-12988.
 
 Upgrading
 ---------

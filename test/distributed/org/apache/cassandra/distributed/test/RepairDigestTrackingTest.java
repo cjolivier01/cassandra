@@ -19,7 +19,11 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
@@ -586,7 +590,7 @@ public class RepairDigestTrackingTest extends TestBaseImpl
             int attempts = 100;
             ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE);
 
-            while (cfs.getSnapshotDetails().isEmpty())
+            while (cfs.listSnapshots().isEmpty())
             {
                 Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
                 if (attempts-- < 0)

@@ -18,7 +18,6 @@
 package org.apache.cassandra.auth;
 
 import java.util.Set;
-
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -40,7 +39,7 @@ public class AuthenticatedUser
 
     // User-level permissions cache.
     private static final PermissionsCache permissionsCache = new PermissionsCache(DatabaseDescriptor.getAuthorizer());
-    private static final NetworkAuthCache networkAuthCache = new NetworkAuthCache(DatabaseDescriptor.getNetworkAuthorizer());
+    private static final NetworkPermissionsCache networkPermissionsCache = new NetworkPermissionsCache(DatabaseDescriptor.getNetworkAuthorizer());
 
     private final String name;
     // primary Role of the logged in user
@@ -136,7 +135,7 @@ public class AuthenticatedUser
      */
     public boolean hasLocalAccess()
     {
-        return networkAuthCache.get(this.getPrimaryRole()).canAccess(Datacenters.thisDatacenter());
+        return networkPermissionsCache.get(this.getPrimaryRole()).canAccess(Datacenters.thisDatacenter());
     }
 
     @Override
@@ -164,5 +163,4 @@ public class AuthenticatedUser
     {
         return Objects.hashCode(name);
     }
-
 }

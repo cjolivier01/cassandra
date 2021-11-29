@@ -112,6 +112,5 @@ public class FunctionResourceTest
                                                                                                                            name,
                                                                                                                            varType)))
                                                                  .withMessage(expected);
-        ;
     }
 }

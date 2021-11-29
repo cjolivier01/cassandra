@@ -52,3 +52,15 @@ enable_sasi_indexes: true
 enable_materialized_views: true
 enable_drop_compact_storage: true
 file_cache_enabled: true
+auto_hints_cleanup_enabled: true
+track_warnings:
+    enabled: true
+    coordinator_read_size:
+        warn_threshold_kb: 1024
+        abort_threshold_kb: 4096
+    local_read_size:
+        warn_threshold_kb: 4096
+        abort_threshold_kb: 8192
+    row_index_size:
+        warn_threshold_kb: 4096
+        abort_threshold_kb: 8192

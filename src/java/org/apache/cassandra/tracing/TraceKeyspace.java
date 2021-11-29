@@ -21,7 +21,9 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Row;
@@ -42,6 +44,8 @@ public final class TraceKeyspace
     private TraceKeyspace()
     {
     }
+
+    private static final int DEFAULT_RF = CassandraRelevantProperties.SYSTEM_TRACES_DEFAULT_RF.getInt();
 
     /**
      * Generation is used as a timestamp for automatic table creation on startup.
@@ -102,7 +106,7 @@ public final class TraceKeyspace
 
     public static KeyspaceMetadata metadata()
     {
-        return KeyspaceMetadata.create(SchemaConstants.TRACE_KEYSPACE_NAME, KeyspaceParams.simple(2), Tables.of(Sessions, Events));
+        return KeyspaceMetadata.create(SchemaConstants.TRACE_KEYSPACE_NAME, KeyspaceParams.simple(Math.max(DEFAULT_RF, DatabaseDescriptor.getDefaultKeyspaceRF())), Tables.of(Sessions, Events));
     }
 
     static Mutation makeStartSessionMutation(ByteBuffer sessionId,
@@ -117,9 +121,9 @@ public final class TraceKeyspace
         Row.SimpleBuilder rb = builder.row();
         rb.ttl(ttl)
           .add("client", client)
-          .add("coordinator", FBUtilities.getBroadcastAddressAndPort().address);
+          .add("coordinator", FBUtilities.getBroadcastAddressAndPort().getAddress());
         if (!Gossiper.instance.hasMajorVersion3Nodes())
-            rb.add("coordinator_port", FBUtilities.getBroadcastAddressAndPort().port);
+            rb.add("coordinator_port", FBUtilities.getBroadcastAddressAndPort().getPort());
         rb.add("request", request)
           .add("started_at", new Date(startedAt))
           .add("command", command)
@@ -144,9 +148,9 @@ public final class TraceKeyspace
                                               .ttl(ttl);
 
         rowBuilder.add("activity", message)
-                  .add("source", FBUtilities.getBroadcastAddressAndPort().address);
+                  .add("source", FBUtilities.getBroadcastAddressAndPort().getAddress());
         if (!Gossiper.instance.hasMajorVersion3Nodes())
-            rowBuilder.add("source_port", FBUtilities.getBroadcastAddressAndPort().port);
+            rowBuilder.add("source_port", FBUtilities.getBroadcastAddressAndPort().getPort());
         rowBuilder.add("thread", threadName);
 
         if (elapsed >= 0)

@@ -80,7 +80,7 @@ public class CompactionStats extends NodeToolCmd
             long remainingBytes = 0;
             TableBuilder table = new TableBuilder();
 
-            table.add("id", "compaction type", "keyspace", "table", "completed", "total", "unit", "progress");
+            table.add("keyspace", "table", "task id", "completion ratio", "kind", "progress", "sstables", "total", "unit");
             for (Map<String, String> c : compactions)
             {
                 long total = Long.parseLong(c.get(CompactionInfo.TOTAL));
@@ -90,11 +90,12 @@ public class CompactionStats extends NodeToolCmd
                 String columnFamily = c.get(CompactionInfo.COLUMNFAMILY);
                 String unit = c.get(CompactionInfo.UNIT);
                 boolean toFileSize = humanReadable && Unit.isFileSize(unit);
-                String completedStr = toFileSize ? FileUtils.stringifyFileSize(completed) : Long.toString(completed);
+                String[] tables = c.get(CompactionInfo.SSTABLES).split(",");
+                String progressStr = toFileSize ? FileUtils.stringifyFileSize(completed) : Long.toString(completed);
                 String totalStr = toFileSize ? FileUtils.stringifyFileSize(total) : Long.toString(total);
                 String percentComplete = total == 0 ? "n/a" : new DecimalFormat("0.00").format((double) completed / total * 100) + "%";
                 String id = c.get(CompactionInfo.COMPACTION_ID);
-                table.add(id, taskType, keyspace, columnFamily, completedStr, totalStr, unit, percentComplete);
+                table.add(keyspace, columnFamily, id, percentComplete, taskType, progressStr, String.valueOf(tables.length), totalStr, unit);
                 remainingBytes += total - completed;
             }
             table.printTo(out);

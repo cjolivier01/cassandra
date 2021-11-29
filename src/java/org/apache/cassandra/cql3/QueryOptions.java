@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableList;
 
 import io.netty.buffer.ByteBuf;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -216,9 +217,101 @@ public abstract class QueryOptions
     // Mainly for the sake of BatchQueryOptions
     abstract SpecificOptions getSpecificOptions();
 
+    abstract TrackWarnings getTrackWarnings();
+
+    public boolean isTrackWarningsEnabled()
+    {
+        return getTrackWarnings().isEnabled();
+    }
+
+    public long getCoordinatorReadSizeWarnThresholdKB()
+    {
+        return getTrackWarnings().getCoordinatorReadSizeWarnThresholdKB();
+    }
+
+    public long getCoordinatorReadSizeAbortThresholdKB()
+    {
+        return getTrackWarnings().getCoordinatorReadSizeAbortThresholdKB();
+    }
+
     public QueryOptions prepare(List<ColumnSpecification> specs)
     {
         return this;
+    }
+
+    interface TrackWarnings
+    {
+        boolean isEnabled();
+
+        long getCoordinatorReadSizeWarnThresholdKB();
+
+        long getCoordinatorReadSizeAbortThresholdKB();
+
+        static TrackWarnings create()
+        {
+            // if daemon initialization hasn't happened yet (very common in tests) then ignore
+            if (!DatabaseDescriptor.isDaemonInitialized())
+                return DisabledTrackWarnings.INSTANCE;
+            boolean enabled = DatabaseDescriptor.getTrackWarningsEnabled();
+            if (!enabled)
+                return DisabledTrackWarnings.INSTANCE;
+            long warnThresholdKB = DatabaseDescriptor.getCoordinatorReadSizeWarnThresholdKB();
+            long abortThresholdKB = DatabaseDescriptor.getCoordinatorReadSizeAbortThresholdKB();
+            return new DefaultTrackWarnings(warnThresholdKB, abortThresholdKB);
+        }
+    }
+
+    private enum DisabledTrackWarnings implements TrackWarnings
+    {
+        INSTANCE;
+
+        @Override
+        public boolean isEnabled()
+        {
+            return false;
+        }
+
+        @Override
+        public long getCoordinatorReadSizeWarnThresholdKB()
+        {
+            return 0;
+        }
+
+        @Override
+        public long getCoordinatorReadSizeAbortThresholdKB()
+        {
+            return 0;
+        }
+    }
+
+    private static class DefaultTrackWarnings implements TrackWarnings
+    {
+        private final long warnThresholdKB;
+        private final long abortThresholdKB;
+
+        public DefaultTrackWarnings(long warnThresholdKB, long abortThresholdKB)
+        {
+            this.warnThresholdKB = warnThresholdKB;
+            this.abortThresholdKB = abortThresholdKB;
+        }
+
+        @Override
+        public boolean isEnabled()
+        {
+            return true;
+        }
+
+        @Override
+        public long getCoordinatorReadSizeWarnThresholdKB()
+        {
+            return warnThresholdKB;
+        }
+
+        @Override
+        public long getCoordinatorReadSizeAbortThresholdKB()
+        {
+            return abortThresholdKB;
+        }
     }
 
     static class DefaultQueryOptions extends QueryOptions
@@ -230,6 +323,7 @@ public abstract class QueryOptions
         private final SpecificOptions options;
 
         private final transient ProtocolVersion protocolVersion;
+        private final transient TrackWarnings trackWarnings = TrackWarnings.create();
 
         DefaultQueryOptions(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, SpecificOptions options, ProtocolVersion protocolVersion)
         {
@@ -263,6 +357,12 @@ public abstract class QueryOptions
         SpecificOptions getSpecificOptions()
         {
             return options;
+        }
+
+        @Override
+        TrackWarnings getTrackWarnings()
+        {
+            return trackWarnings;
         }
     }
 
@@ -298,6 +398,12 @@ public abstract class QueryOptions
         SpecificOptions getSpecificOptions()
         {
             return wrapped.getSpecificOptions();
+        }
+
+        @Override
+        TrackWarnings getTrackWarnings()
+        {
+            return wrapped.getTrackWarnings();
         }
 
         @Override

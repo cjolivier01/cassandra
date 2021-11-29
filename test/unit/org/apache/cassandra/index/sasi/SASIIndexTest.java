@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.index.sasi;
 
-import java.io.File;
-import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
@@ -43,6 +41,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -85,6 +84,8 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.service.snapshot.SnapshotManifest;
+import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -165,13 +166,11 @@ public class SASIIndexTest
         try
         {
             store.snapshot(snapshotName);
-            FileReader reader = new FileReader(store.getDirectories().getSnapshotManifestFile(snapshotName));
-            JSONObject manifest = (JSONObject) new JSONParser().parse(reader);
-            JSONArray files = (JSONArray) manifest.get("files");
+            SnapshotManifest manifest = SnapshotManifest.deserializeFromJsonFile(store.getDirectories().getSnapshotManifestFile(snapshotName));
 
             Assert.assertFalse(ssTableReaders.isEmpty());
-            Assert.assertFalse(files.isEmpty());
-            Assert.assertEquals(ssTableReaders.size(), files.size());
+            Assert.assertFalse(manifest.files.isEmpty());
+            Assert.assertEquals(ssTableReaders.size(), manifest.files.size());
 
             Map<Descriptor, Set<Component>> snapshotSSTables = store.getDirectories()
                                                                     .sstableLister(Directories.OnTxnErr.IGNORE)
@@ -205,11 +204,11 @@ public class SASIIndexTest
                         tableSize += componentSize;
                 }
             }
-
-            Map<String, Directories.SnapshotSizeDetails> details = store.getSnapshotDetails();
+            
+            TableSnapshot details = store.listSnapshots().get(snapshotName);
 
             // check that SASI components are included in the computation of snapshot size
-            Assert.assertEquals((long) details.get(snapshotName).dataSizeBytes, tableSize + indexSize);
+            Assert.assertEquals(details.computeTrueSizeBytes(), tableSize + indexSize);
         }
         finally
         {

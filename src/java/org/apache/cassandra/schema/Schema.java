@@ -48,6 +48,7 @@ import org.apache.cassandra.utils.Pair;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import static java.lang.String.format;
+
 import static com.google.common.collect.Iterables.size;
 
 public final class Schema implements SchemaProvider
@@ -272,6 +273,20 @@ public final class Schema implements SchemaProvider
     public Keyspaces snapshot()
     {
         return keyspaces;
+    }
+
+    /**
+     * Compute the largest gc grace seconds amongst all the tables
+     * @return the largest gcgs.
+     */
+    public int largestGcgs()
+    {
+        int gcgs = Integer.MIN_VALUE;
+        for (TableMetadataRef tableMetadataRef : metadataRefs.values())
+        {
+            gcgs = Math.max(gcgs, tableMetadataRef.get().params.gcGraceSeconds);
+        }
+        return gcgs;
     }
 
     /**

@@ -34,8 +34,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.audit.AuditLogOptions;
-import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.fql.FullQueryLoggerOptions;
 
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
@@ -74,12 +74,15 @@ public class Config
     public Set<String> hinted_handoff_disabled_datacenters = Sets.newConcurrentHashSet();
     public volatile int max_hint_window_in_ms = 3 * 3600 * 1000; // three hours
     public String hints_directory;
+    public boolean hint_window_persistent_enabled = true;
 
     public ParameterizedClass seed_provider;
     public DiskAccessMode disk_access_mode = DiskAccessMode.auto;
 
     public DiskFailurePolicy disk_failure_policy = DiskFailurePolicy.ignore;
     public CommitFailurePolicy commit_failure_policy = CommitFailurePolicy.stop;
+
+    public volatile boolean use_deterministic_table_id = false;
 
     /* initial token in the ring */
     public String initial_token;
@@ -118,6 +121,7 @@ public class Config
     public int concurrent_writes = 32;
     public int concurrent_counter_writes = 32;
     public int concurrent_materialized_view_writes = 32;
+    public int available_processors = -1;
 
     @Deprecated
     public Integer concurrent_replicates = null;
@@ -142,6 +146,8 @@ public class Config
     public String broadcast_address;
     public boolean listen_on_broadcast_address = false;
     public String internode_authenticator;
+
+    public boolean traverse_auth_from_root = false;
 
     /*
      * RPC address and interface refer to the address/interface used for the native protocol used to communicate with
@@ -186,13 +192,15 @@ public class Config
     public int native_transport_port = 9042;
     public Integer native_transport_port_ssl = null;
     public int native_transport_max_threads = 128;
-    public int native_transport_max_frame_size_in_mb = 256;
+    public int native_transport_max_frame_size_in_mb = 16;
     public volatile long native_transport_max_concurrent_connections = -1L;
     public volatile long native_transport_max_concurrent_connections_per_ip = -1L;
     public boolean native_transport_flush_in_batches_legacy = false;
     public volatile boolean native_transport_allow_older_protocols = true;
     public volatile long native_transport_max_concurrent_requests_in_bytes_per_ip = -1L;
     public volatile long native_transport_max_concurrent_requests_in_bytes = -1L;
+    public volatile boolean native_transport_rate_limiting_enabled = false;
+    public volatile int native_transport_max_requests_per_second = 1000000;
     public int native_transport_receive_queue_capacity_in_bytes = 1 << 20; // 1MiB
 
     @Deprecated
@@ -219,6 +227,7 @@ public class Config
     public volatile int compaction_throughput_mb_per_sec = 16;
     public volatile int compaction_large_partition_warning_threshold_mb = 100;
     public int min_free_space_per_drive_in_mb = 50;
+    public volatile Integer compaction_tombstone_warning_threshold = 100000;
 
     public volatile int concurrent_materialized_view_builders = 1;
     public volatile int reject_repair_compaction_threshold = Integer.MAX_VALUE;
@@ -277,6 +286,8 @@ public class Config
     public int dynamic_snitch_reset_interval_in_ms = 600000;
     public double dynamic_snitch_badness_threshold = 1.0;
 
+    public String failure_detector = "FailureDetector";
+
     public EncryptionOptions.ServerEncryptionOptions server_encryption_options = new EncryptionOptions.ServerEncryptionOptions();
     public EncryptionOptions client_encryption_options = new EncryptionOptions();
 
@@ -288,6 +299,7 @@ public class Config
     public int hints_flush_period_in_ms = 10000;
     public int max_hints_file_size_in_mb = 128;
     public ParameterizedClass hints_compression;
+    public volatile boolean auto_hints_cleanup_enabled = false;
 
     public volatile boolean incremental_backups = false;
     public boolean trickle_fsync = false;
@@ -308,6 +320,8 @@ public class Config
     public Long counter_cache_size_in_mb = null;
     public volatile int counter_cache_save_period = 7200;
     public volatile int counter_cache_keys_to_save = Integer.MAX_VALUE;
+
+    public Long paxos_cache_size_in_mb = null;
 
     private static boolean isClientMode = false;
     private static Supplier<Config> overrideLoadConfig = null;
@@ -341,6 +355,8 @@ public class Config
     public boolean inter_dc_tcp_nodelay = true;
 
     public MemtableAllocationType memtable_allocation_type = MemtableAllocationType.heap_buffers;
+
+    public final TrackWarnings track_warnings = new TrackWarnings();
 
     public volatile int tombstone_warn_threshold = 1000;
     public volatile int tombstone_failure_threshold = 100000;
@@ -473,6 +489,11 @@ public class Config
 
     public volatile boolean diagnostic_events_enabled = false;
 
+    // Default and minimum keyspace replication factors allow validation of newly created keyspaces
+    // and good defaults if no replication factor is provided by the user
+    public volatile int default_keyspace_rf = 1;
+    public volatile int minimum_keyspace_rf = 0;
+
     /**
      * flags for enabling tracking repaired state of data during reads
      * separate flags for range & single partition reads as single partition reads are only tracked
@@ -505,6 +526,11 @@ public class Config
      * a tombstone being compacted away
      */
     public volatile int validation_preview_purge_head_start_in_sec = 60 * 60;
+
+    // Using String instead of ConsistencyLevel here to keep static initialization from cascading and starting
+    // threads during tool usage mode. See CASSANDRA-12988 and DatabaseDescriptorRefTest for details
+    public volatile String auth_read_consistency_level = "LOCAL_QUORUM";
+    public volatile String auth_write_consistency_level = "EACH_QUORUM";
 
     /**
      * The intial capacity for creating RangeTombstoneList.
@@ -566,6 +592,9 @@ public class Config
 
     public volatile int consecutive_message_errors_threshold = 1;
 
+    public volatile SubnetGroups client_error_reporting_exclusions = new SubnetGroups();
+    public volatile SubnetGroups internode_error_reporting_exclusions = new SubnetGroups();
+
     public static Supplier<Config> getOverrideLoadConfig()
     {
         return overrideLoadConfig;
@@ -606,6 +635,7 @@ public class Config
     public enum MemtableAllocationType
     {
         unslabbed_heap_buffers,
+        unslabbed_heap_buffers_logged,
         heap_buffers,
         offheap_buffers,
         offheap_objects

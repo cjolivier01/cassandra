@@ -55,10 +55,8 @@ import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTrees;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 
-import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -111,21 +109,21 @@ public class ValidatorTest
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(columnFamily);
 
         Validator validator = new Validator(desc, remote, 0, PreviewKind.NONE);
-        MerkleTrees tree = new MerkleTrees(partitioner);
-        tree.addMerkleTrees((int) Math.pow(2, 15), validator.desc.ranges);
-        validator.prepare(cfs, tree);
+        MerkleTrees trees = new MerkleTrees(partitioner);
+        trees.addMerkleTrees((int) Math.pow(2, 15), validator.desc.ranges);
+        validator.prepare(cfs, trees);
 
-        // and confirm that the tree was split
-        assertTrue(tree.size() > 1);
+        // and confirm that the trees were split
+        assertTrue(trees.size() > 1);
 
         // add a row
         Token mid = partitioner.midpoint(range.left, range.right);
         validator.add(EmptyIterators.unfilteredRow(cfs.metadata(), new BufferDecoratedKey(mid, ByteBufferUtil.bytes("inconceivable!")), false));
         validator.complete();
 
-        // confirm that the tree was validated
-        Token min = tree.partitioner().getMinimumToken();
-        assertNotNull(tree.hash(new Range<>(min, min)));
+        // confirm that the trees were validated
+        Token min = trees.partitioner().getMinimumToken();
+        assertNotNull(trees.hash(new Range<>(min, min)));
 
         Message message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
         assertEquals(Verb.VALIDATION_RSP, message.verb());

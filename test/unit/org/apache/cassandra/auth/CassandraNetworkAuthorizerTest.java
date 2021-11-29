@@ -43,13 +43,13 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.ClientState;
 
 import static org.apache.cassandra.auth.AuthKeyspace.NETWORK_PERMISSIONS;
-import static org.apache.cassandra.auth.RoleTestUtils.LocalCassandraRoleManager;
+import static org.apache.cassandra.auth.AuthTestUtils.LocalCassandraRoleManager;
+import static org.apache.cassandra.auth.AuthTestUtils.getRolesReadCount;
 import static org.apache.cassandra.schema.SchemaConstants.AUTH_KEYSPACE_NAME;
-import static org.apache.cassandra.auth.RoleTestUtils.getReadCount;
 
 public class CassandraNetworkAuthorizerTest
 {
-    private static void setupSuperUser()
+    public static void setupSuperUser()
     {
         QueryProcessor.executeInternal(String.format("INSERT INTO %s.%s (role, is_superuser, can_login, salted_hash) "
                                                      + "VALUES ('%s', true, true, '%s')",
@@ -65,8 +65,8 @@ public class CassandraNetworkAuthorizerTest
         SchemaLoader.prepareServer();
         SchemaLoader.setupAuth(new LocalCassandraRoleManager(),
                                new PasswordAuthenticator(),
-                               new RoleTestUtils.LocalCassandraAuthorizer(),
-                               new RoleTestUtils.LocalCassandraNetworkAuthorizer());
+                               new AuthTestUtils.LocalCassandraAuthorizer(),
+                               new AuthTestUtils.LocalCassandraNetworkAuthorizer());
         setupSuperUser();
         // not strictly necessary to init the cache here, but better to be explicit
         Roles.initRolesCache(DatabaseDescriptor.getRoleManager(), () -> true);
@@ -211,10 +211,10 @@ public class CassandraNetworkAuthorizerTest
     {
         String username = createName();
         auth("CREATE ROLE %s", username);
-        long readCount = getReadCount();
+        long readCount = getRolesReadCount();
         dcPerms(username);
-        Assert.assertEquals(++readCount, getReadCount());
+        Assert.assertEquals(++readCount, getRolesReadCount());
         dcPerms(username);
-        Assert.assertEquals(readCount, getReadCount());
+        Assert.assertEquals(readCount, getRolesReadCount());
     }
 }

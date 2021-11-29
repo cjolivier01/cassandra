@@ -34,6 +34,7 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.exceptions.ReadAbortException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.UnavailableException;
@@ -50,6 +51,8 @@ import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
+
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 class RangeCommandIterator extends AbstractIterator<RowIterator> implements PartitionIterator
 {
@@ -89,7 +92,7 @@ class RangeCommandIterator extends AbstractIterator<RowIterator> implements Part
         this.totalRangeCount = totalRangeCount;
         this.queryStartNanoTime = queryStartNanoTime;
 
-        startTime = System.nanoTime();
+        startTime = nanoTime();
         enforceStrictLiveness = command.metadata().enforceStrictLiveness();
     }
 
@@ -127,6 +130,11 @@ class RangeCommandIterator extends AbstractIterator<RowIterator> implements Part
         catch (ReadTimeoutException e)
         {
             rangeMetrics.timeouts.mark();
+            throw e;
+        }
+        catch (ReadAbortException e)
+        {
+            rangeMetrics.markAbort(e);
             throw e;
         }
         catch (ReadFailureException e)
@@ -256,7 +264,7 @@ class RangeCommandIterator extends AbstractIterator<RowIterator> implements Part
         }
         finally
         {
-            long latency = System.nanoTime() - startTime;
+            long latency = nanoTime() - startTime;
             rangeMetrics.addNano(latency);
             Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
         }

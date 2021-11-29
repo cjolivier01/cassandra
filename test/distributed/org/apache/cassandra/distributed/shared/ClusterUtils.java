@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.distributed.shared;
 
-import java.io.File;
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -39,6 +39,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Futures;
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 
 import org.apache.cassandra.dht.Token;
@@ -52,6 +53,7 @@ import org.apache.cassandra.distributed.impl.AbstractCluster;
 import org.apache.cassandra.distributed.impl.InstanceConfig;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Isolated;
 
 import static com.google.common.util.concurrent.Uninterruptibles.sleepUninterruptibly;
 import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SCHEMA_DELAY_MS;
@@ -139,6 +141,22 @@ public class ClusterUtils
      * Create a new instance and add it to the cluster, without starting it.
      *
      * @param cluster to add to
+     * @param other config to copy from
+     * @param fn function to add to the config before starting
+     * @param <I> instance type
+     * @return the instance added
+     */
+    public static <I extends IInstance> I addInstance(AbstractCluster<I> cluster,
+                                                      IInstanceConfig other,
+                                                      Consumer<IInstanceConfig> fn)
+    {
+        return addInstance(cluster, other.localDatacenter(), other.localRack(), fn);
+    }
+
+    /**
+     * Create a new instance and add it to the cluster, without starting it.
+     *
+     * @param cluster to add to
      * @param dc the instance should be in
      * @param rack the instance should be in
      * @param <I> instance type
@@ -208,8 +226,26 @@ public class ClusterUtils
                                                               IInstance toReplace,
                                                               Consumer<WithProperties> fn)
     {
+        return replaceHostAndStart(cluster, toReplace, (ignore, prop) -> fn.accept(prop));
+    }
+
+    /**
+     * Create and start a new instance that replaces an existing instance.
+     *
+     * The instance will be in the same datacenter and rack as the existing instance.
+     *
+     * @param cluster to add to
+     * @param toReplace instance to replace
+     * @param fn lambda to add additional properties or modify instance
+     * @param <I> instance type
+     * @return the instance added
+     */
+    public static <I extends IInstance> I replaceHostAndStart(AbstractCluster<I> cluster,
+                                                              IInstance toReplace,
+                                                              BiConsumer<I, WithProperties> fn)
+    {
         IInstanceConfig toReplaceConf = toReplace.config();
-        I inst = addInstance(cluster, toReplaceConf.localDatacenter(), toReplaceConf.localRack(), c -> c.set("auto_bootstrap", true));
+        I inst = addInstance(cluster, toReplaceConf, c -> c.set("auto_bootstrap", true));
 
         return start(inst, properties -> {
             // lower this so the replacement waits less time
@@ -221,7 +257,7 @@ public class ClusterUtils
             // state which node to replace
             properties.setProperty("cassandra.replace_address_first_boot", toReplace.config().broadcastAddress().getAddress().getHostAddress());
 
-            fn.accept(properties);
+            fn.accept(inst, properties);
         });
     }
 
@@ -702,13 +738,33 @@ public class ClusterUtils
      */
     private static void updateAddress(IInstanceConfig conf, String address)
     {
+        InetSocketAddress previous = conf.broadcastAddress();
+
         for (String key : Arrays.asList("broadcast_address", "listen_address", "broadcast_rpc_address", "rpc_address"))
             conf.set(key, address);
 
         // InstanceConfig caches InetSocketAddress -> InetAddressAndPort
         // this causes issues as startup now ignores config, so force reset it to pull from conf.
         ((InstanceConfig) conf).unsetBroadcastAddressAndPort(); //TODO remove the need to null out the cache...
-        conf.networkTopology().put(conf.broadcastAddress(), NetworkTopology.dcAndRack(conf.localDatacenter(), conf.localRack()));
+
+        //TODO NetworkTopology class isn't flexible and doesn't handle adding/removing nodes well...
+        // it also uses a HashMap which makes the class not thread safe... so mutating AFTER starting nodes
+        // are a risk
+        if (!conf.broadcastAddress().equals(previous))
+        {
+            conf.networkTopology().put(conf.broadcastAddress(), NetworkTopology.dcAndRack(conf.localDatacenter(), conf.localRack()));
+            try
+            {
+                Field field = NetworkTopology.class.getDeclaredField("map");
+                field.setAccessible(true);
+                Map<InetSocketAddress, NetworkTopology.DcAndRack> map = (Map<InetSocketAddress, NetworkTopology.DcAndRack>) field.get(conf.networkTopology());
+                map.remove(previous);
+            }
+            catch (NoSuchFieldException | IllegalAccessException e)
+            {
+                throw new AssertionError(e);
+            }
+        }
     }
 
     /**

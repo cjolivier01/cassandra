@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.compaction;
 
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -39,6 +38,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Longs;
+import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -587,9 +587,47 @@ public class CompactionStrategyManager implements INotificationConsumer
         return null;
     }
 
+    public long[] getPerLevelSizeBytes()
+    {
+        readLock.lock();
+        try
+        {
+            if (repaired.first() instanceof LeveledCompactionStrategy)
+            {
+                long [] res = new long[LeveledGenerations.MAX_LEVEL_COUNT];
+                for (AbstractCompactionStrategy strategy : getAllStrategies())
+                {
+                    long[] repairedCountPerLevel = ((LeveledCompactionStrategy) strategy).getAllLevelSizeBytes();
+                    res = sumArrays(res, repairedCountPerLevel);
+                }
+                return res;
+            }
+            return null;
+        }
+        finally
+        {
+            readLock.unlock();
+        }
+    }
+
     static int[] sumArrays(int[] a, int[] b)
     {
         int[] res = new int[Math.max(a.length, b.length)];
+        for (int i = 0; i < res.length; i++)
+        {
+            if (i < a.length && i < b.length)
+                res[i] = a[i] + b[i];
+            else if (i < a.length)
+                res[i] = a[i];
+            else
+                res[i] = b[i];
+        }
+        return res;
+    }
+
+    static long[] sumArrays(long[] a, long[] b)
+    {
+        long[] res = new long[Math.max(a.length, b.length)];
         for (int i = 0; i < res.length; i++)
         {
             if (i < a.length && i < b.length)
@@ -1106,13 +1144,13 @@ public class CompactionStrategyManager implements INotificationConsumer
                 {
                     int idx = holder.getStrategyIndex(strategy);
                     if (idx >= 0)
-                        return Collections.singletonList(locations[idx].location.getAbsolutePath());
+                        return Collections.singletonList(locations[idx].location.absolutePath());
                 }
             }
             List<String> folders = new ArrayList<>(locations.length);
             for (Directories.DataDirectory location : locations)
             {
-                folders.add(location.location.getAbsolutePath());
+                folders.add(location.location.absolutePath());
             }
             return folders;
         }

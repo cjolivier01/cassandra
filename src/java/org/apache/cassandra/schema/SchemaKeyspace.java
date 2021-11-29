@@ -65,7 +65,7 @@ import static org.apache.cassandra.schema.SchemaKeyspaceTables.*;
  * Please notice this class is _not_ thread safe. It should be accessed through {@link org.apache.cassandra.schema.Schema}. See CASSANDRA-16856/16996
  */
 @NotThreadSafe
-final class SchemaKeyspace
+public final class SchemaKeyspace
 {
     private SchemaKeyspace()
     {
@@ -80,7 +80,7 @@ final class SchemaKeyspace
      * The tables to which we added the cdc column. This is used in {@link #makeUpdateForSchema} below to make sure we skip that
      * column is cdc is disabled as the columns breaks pre-cdc to post-cdc upgrades (typically, 3.0 -> 3.X).
      */
-    private static final Set<String> TABLES_WITH_CDC_ADDED = ImmutableSet.of(TABLES, VIEWS);
+    private static final Set<String> TABLES_WITH_CDC_ADDED = ImmutableSet.of(SchemaKeyspaceTables.TABLES, SchemaKeyspaceTables.VIEWS);
 
     private static final TableMetadata Keyspaces =
         parse(KEYSPACES,

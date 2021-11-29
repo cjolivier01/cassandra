@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.compaction;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,12 +27,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.io.util.File;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.After;
@@ -43,6 +42,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.repair.NoSuchRepairSessionException;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -237,7 +237,7 @@ public class AntiCompactionTest
     }
 
     @Test
-    public void antiCompactionSizeTest() throws InterruptedException, IOException
+    public void antiCompactionSizeTest() throws InterruptedException, IOException, NoSuchRepairSessionException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
@@ -303,7 +303,7 @@ public class AntiCompactionTest
     }
 
     @Test
-    public void antiCompactTenFull() throws InterruptedException, IOException
+    public void antiCompactTenFull() throws IOException, NoSuchRepairSessionException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF);
@@ -326,7 +326,7 @@ public class AntiCompactionTest
     }
 
     @Test
-    public void antiCompactTenTrans() throws InterruptedException, IOException
+    public void antiCompactTenTrans() throws IOException, NoSuchRepairSessionException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF);
@@ -349,7 +349,7 @@ public class AntiCompactionTest
     }
 
     @Test
-    public void antiCompactTenMixed() throws InterruptedException, IOException
+    public void antiCompactTenMixed() throws IOException, NoSuchRepairSessionException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF);
@@ -368,7 +368,7 @@ public class AntiCompactionTest
     }
 
     @Test
-    public void shouldMutatePendingRepair() throws InterruptedException, IOException
+    public void shouldMutatePendingRepair() throws InterruptedException, IOException, NoSuchRepairSessionException
     {
         ColumnFamilyStore store = prepareColumnFamilyStore();
         Collection<SSTableReader> sstables = getUnrepairedSSTables(store);
@@ -394,7 +394,7 @@ public class AntiCompactionTest
     }
 
     @Test
-    public void shouldSkipAntiCompactionForNonIntersectingRange() throws InterruptedException, IOException
+    public void shouldSkipAntiCompactionForNonIntersectingRange() throws IOException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF);

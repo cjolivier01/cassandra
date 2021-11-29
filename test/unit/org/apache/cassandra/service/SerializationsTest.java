@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.google.common.collect.Lists;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -39,7 +40,6 @@ import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.SyncNodePair;
@@ -103,7 +103,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         if (EXECUTE_WRITES)
             testValidationRequestWrite();
 
-        try (DataInputStreamPlus in = getInput("service.ValidationRequest.bin"))
+        try (FileInputStreamPlus in = getInput("service.ValidationRequest.bin"))
         {
             ValidationRequest message = ValidationRequest.serializer.deserialize(in, getVersion());
             assert DESC.equals(message.desc);
@@ -115,20 +115,20 @@ public class SerializationsTest extends AbstractSerializationsTester
     {
         IPartitioner p = RandomPartitioner.instance;
 
-        MerkleTrees mt = new MerkleTrees(p);
+        MerkleTrees mts = new MerkleTrees(p);
 
         // empty validation
-        mt.addMerkleTree((int) Math.pow(2, 15), FULL_RANGE);
+        mts.addMerkleTree((int) Math.pow(2, 15), FULL_RANGE);
         Validator v0 = new Validator(DESC, FBUtilities.getBroadcastAddressAndPort(), -1, PreviewKind.NONE);
-        ValidationResponse c0 = new ValidationResponse(DESC, mt);
+        ValidationResponse c0 = new ValidationResponse(DESC, mts);
 
         // validation with a tree
-        mt = new MerkleTrees(p);
-        mt.addMerkleTree(Integer.MAX_VALUE, FULL_RANGE);
+        mts = new MerkleTrees(p);
+        mts.addMerkleTree(Integer.MAX_VALUE, FULL_RANGE);
         for (int i = 0; i < 10; i++)
-            mt.split(p.getRandomToken());
+            mts.split(p.getRandomToken());
         Validator v1 = new Validator(DESC, FBUtilities.getBroadcastAddressAndPort(), -1, PreviewKind.NONE);
-        ValidationResponse c1 = new ValidationResponse(DESC, mt);
+        ValidationResponse c1 = new ValidationResponse(DESC, mts);
 
         // validation failed
         ValidationResponse c3 = new ValidationResponse(DESC);
@@ -142,7 +142,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         if (EXECUTE_WRITES)
             testValidationCompleteWrite();
 
-        try (DataInputStreamPlus in = getInput("service.ValidationComplete.bin"))
+        try (FileInputStreamPlus in = getInput("service.ValidationComplete.bin"))
         {
             // empty validation
             ValidationResponse message = ValidationResponse.serializer.deserialize(in, getVersion());
@@ -187,7 +187,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         InetAddressAndPort src = InetAddressAndPort.getByNameOverrideDefaults("127.0.0.2", PORT);
         InetAddressAndPort dest = InetAddressAndPort.getByNameOverrideDefaults("127.0.0.3", PORT);
 
-        try (DataInputStreamPlus in = getInput("service.SyncRequest.bin"))
+        try (FileInputStreamPlus in = getInput("service.SyncRequest.bin"))
         {
             SyncRequest message = SyncRequest.serializer.deserialize(in, getVersion());
             assert DESC.equals(message.desc);
@@ -226,7 +226,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         InetAddressAndPort dest = InetAddressAndPort.getByNameOverrideDefaults("127.0.0.3", PORT);
         SyncNodePair nodes = new SyncNodePair(src, dest);
 
-        try (DataInputStreamPlus in = getInput("service.SyncComplete.bin"))
+        try (FileInputStreamPlus in = getInput("service.SyncComplete.bin"))
         {
             // success
             SyncResponse message = SyncResponse.serializer.deserialize(in, getVersion());

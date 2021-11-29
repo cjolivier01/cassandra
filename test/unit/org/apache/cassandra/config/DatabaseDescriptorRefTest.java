@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import com.google.common.base.Throwables;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.Pair;
@@ -66,6 +67,8 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.auth.IRoleManager",
     "org.apache.cassandra.auth.INetworkAuthorizer",
     "org.apache.cassandra.config.DatabaseDescriptor",
+    "org.apache.cassandra.config.CassandraRelevantProperties",
+    "org.apache.cassandra.config.CassandraRelevantProperties$PropertyConverter",
     "org.apache.cassandra.config.ConfigurationLoader",
     "org.apache.cassandra.config.Config",
     "org.apache.cassandra.config.Config$1",
@@ -93,6 +96,10 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.config.YamlConfigurationLoader$PropertiesChecker$1",
     "org.apache.cassandra.config.YamlConfigurationLoader$CustomConstructor",
     "org.apache.cassandra.config.TransparentDataEncryptionOptions",
+    "org.apache.cassandra.config.SubnetGroups",
+    "org.apache.cassandra.config.TrackWarnings",
+    "org.apache.cassandra.config.TrackWarnings$LongByteThreshold",
+    "org.apache.cassandra.config.TrackWarnings$IntByteThreshold",
     "org.apache.cassandra.db.ConsistencyLevel",
     "org.apache.cassandra.db.commitlog.CommitLogSegmentManagerFactory",
     "org.apache.cassandra.db.commitlog.DefaultCommitLogSegmentMgrFactory",
@@ -125,6 +132,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.exceptions.TransportException",
     "org.apache.cassandra.fql.FullQueryLogger",
     "org.apache.cassandra.fql.FullQueryLoggerOptions",
+    "org.apache.cassandra.gms.IFailureDetector",
     "org.apache.cassandra.locator.IEndpointSnitch",
     "org.apache.cassandra.io.FSWriteError",
     "org.apache.cassandra.io.FSError",
@@ -133,15 +141,20 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.io.compress.LZ4Compressor",
     "org.apache.cassandra.io.sstable.metadata.MetadataType",
     "org.apache.cassandra.io.util.BufferedDataOutputStreamPlus",
+    "org.apache.cassandra.io.util.FileInputStreamPlus",
+    "org.apache.cassandra.io.util.FileOutputStreamPlus",
+    "org.apache.cassandra.io.util.File",
     "org.apache.cassandra.io.util.DataOutputBuffer",
     "org.apache.cassandra.io.util.DataOutputBufferFixed",
     "org.apache.cassandra.io.util.DataOutputStreamPlus",
     "org.apache.cassandra.io.util.DataOutputPlus",
     "org.apache.cassandra.io.util.DiskOptimizationStrategy",
     "org.apache.cassandra.io.util.SpinningDiskOptimizationStrategy",
+    "org.apache.cassandra.io.util.PathUtils$IOToLongFunction",
     "org.apache.cassandra.locator.Replica",
     "org.apache.cassandra.locator.SimpleSeedProvider",
     "org.apache.cassandra.locator.SeedProvider",
+    "org.apache.cassandra.security.ISslContextFactory",
     "org.apache.cassandra.security.SSLFactory",
     "org.apache.cassandra.security.EncryptionContext",
     "org.apache.cassandra.service.CacheService$CacheType",
@@ -150,6 +163,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.utils.FBUtilities$1",
     "org.apache.cassandra.utils.CloseableIterator",
     "org.apache.cassandra.utils.Pair",
+    "org.apache.cassandra.utils.concurrent.UncheckedInterruptedException",
     "org.apache.cassandra.ConsoleAppender",
     "org.apache.cassandra.ConsoleAppender$1",
     "org.apache.cassandra.LogbackStatusListener",
@@ -295,7 +309,7 @@ public class DatabaseDescriptorRefTest
         {
             Method method = databaseDescriptorClass.getDeclaredMethod(methodName);
             method.invoke(null);
-            
+
             if (threadCount != threads.getThreadCount())
             {
                 for (ThreadInfo threadInfo : threads.getThreadInfo(threads.getAllThreadIds()))
@@ -311,15 +325,15 @@ public class DatabaseDescriptorRefTest
     {
         if (!violations.isEmpty())
         {
+            StringBuilder sb = new StringBuilder();
             for (Pair<String, Exception> violation : new ArrayList<>(violations))
-            {
-                err.println();
-                err.println();
-                err.println("VIOLATION: " + violation.left);
-                violation.right.printStackTrace(err);
-            }
+                sb.append("\n\n")
+                  .append("VIOLATION: ").append(violation.left).append('\n')
+                  .append(Throwables.getStackTraceAsString(violation.right));
+            String msg = sb.toString();
+            err.println(msg);
 
-            fail();
+            fail(msg);
         }
     }
 }

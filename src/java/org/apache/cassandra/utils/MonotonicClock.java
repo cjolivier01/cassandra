@@ -30,6 +30,10 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.Config;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_MONOTONIC_APPROX;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_MONOTONIC_PRECISE;
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.utils.Shared.Scope.SIMULATION;
 
 /**
  * Wrapper around time related functions that are either implemented by using the default JVM calls
@@ -39,7 +43,10 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
  *
  * Please note that {@link java.time.Clock} wasn't used, as it would not be possible to provide an
  * implementation for {@link #now()} with the exact same properties of {@link System#nanoTime()}.
+ *
+ * TODO better rationalise MonotonicClock/Clock
  */
+@Shared(scope = SIMULATION)
 public interface MonotonicClock
 {
     /**
@@ -76,9 +83,7 @@ public interface MonotonicClock
 
         private static MonotonicClock precise()
         {
-            String sclock = System.getProperty("cassandra.clock");
-            if (sclock == null)
-                sclock = System.getProperty("cassandra.monotonic_clock.precise");
+            String sclock = CLOCK_MONOTONIC_PRECISE.getString();
 
             if (sclock != null)
             {
@@ -98,7 +103,7 @@ public interface MonotonicClock
 
         private static MonotonicClock approx(MonotonicClock precise)
         {
-            String sclock = System.getProperty("cassandra.monotonic_clock.approx");
+            String sclock = CLOCK_MONOTONIC_APPROX.getString();
             if (sclock != null)
             {
                 try
@@ -207,7 +212,7 @@ public interface MonotonicClock
         {
             final int tries = 3;
             long[] samples = new long[2 * tries + 1];
-            samples[0] = System.nanoTime();
+            samples[0] = nanoTime();
             for (int i = 1 ; i < samples.length ; i += 2)
             {
                 samples[i] = millisSinceEpoch.getAsLong();
@@ -244,13 +249,13 @@ public interface MonotonicClock
     {
         private SystemClock()
         {
-            super(System::currentTimeMillis);
+            super(Clock.Global::currentTimeMillis);
         }
 
         @Override
         public long now()
         {
-            return System.nanoTime();
+            return nanoTime();
         }
 
         @Override
